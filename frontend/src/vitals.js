@@ -38,6 +38,10 @@ const SOURCE_LABELS = {
   client: "Client",
 };
 
+/// Translate a UI string via the shared i18n.js table. Keys are the English
+/// source text; falls back to the raw key when i18n.js has not loaded.
+const t = (key, params) => (window.RobonixI18N ? window.RobonixI18N.t(key, params) : key);
+
 const byId = (id) => document.getElementById(id);
 
 function clear(node) {
@@ -59,7 +63,7 @@ function setHealthLabel(node, health) {
   if (!node) return;
   const normalized = safeHealth(health);
   node.className = `health-label ${normalized}`;
-  node.textContent = normalized;
+  node.textContent = t(normalized);
 }
 
 function icon(iconNode, size = 16) {
@@ -88,10 +92,10 @@ function componentIcon(type) {
 function formatAge(timestampMs) {
   if (!timestampMs) return "--";
   const seconds = Math.max(0, Math.floor((Date.now() - timestampMs) / 1000));
-  if (seconds < 2) return "now";
-  if (seconds < 60) return `${seconds}s ago`;
+  if (seconds < 2) return t("now");
+  if (seconds < 60) return t("{seconds}s ago", { seconds });
   const minutes = Math.floor(seconds / 60);
-  return `${minutes}m ago`;
+  return t("{minutes}m ago", { minutes });
 }
 
 function formatDateTime(timestampMs) {
@@ -107,11 +111,13 @@ function formatDateTime(timestampMs) {
 
 function healthSummary(summary, noun) {
   const total = Number(summary?.total || 0);
-  if (!total) return `0 ${noun}`;
+  if (!total) return t(`0 ${noun}`);
   const attention = Number(summary.error || 0) + Number(summary.warn || 0) + Number(summary.stale || 0);
-  if (attention) return `${attention} attention / ${total}`;
+  if (attention) return t("{count} attention / {total}", { count: attention, total });
   const unknown = Number(summary.unknown || 0);
-  return unknown ? `${unknown} unknown / ${total}` : `${total} healthy`;
+  return unknown
+    ? t("{count} unknown / {total}", { count: unknown, total })
+    : t("{count} healthy", { count: total });
 }
 
 function createMaterial(color, metalness = 0.28, roughness = 0.5) {
@@ -961,7 +967,7 @@ class VitalsDashboard {
     } catch (error) {
       const fallback = document.createElement("div");
       fallback.className = "vitals-empty vitals-canvas-fallback";
-      fallback.textContent = `3D renderer unavailable: ${error}`;
+      fallback.textContent = t("3D renderer unavailable: {error}", { error });
       byId("vitalsCanvas")?.appendChild(fallback);
       this.sources.set("client", { state: "error", error: String(error) });
     }
@@ -978,6 +984,7 @@ class VitalsDashboard {
     byId("vitalsModulesTab")?.addEventListener("click", () => this.setSoftwareMode("modules"));
     byId("vitalsProvidersTab")?.addEventListener("click", () => this.setSoftwareMode("providers"));
     window.addEventListener("robonix:page", (event) => this.setActive(event.detail?.name === "vitals"));
+    window.addEventListener("robonix:i18n", () => this.renderAll());
     window.addEventListener("robonix:settings", () => {
       if (this.active) this.connect(true);
     });
@@ -1041,7 +1048,7 @@ class VitalsDashboard {
       }
     };
     socket.onerror = () => {
-      this.sources.set("client", { state: "error", error: "Vitals WebSocket failed" });
+      this.sources.set("client", { state: "error", error: t("Vitals WebSocket failed") });
       this.renderSources();
     };
     socket.onclose = () => {
@@ -1109,7 +1116,7 @@ class VitalsDashboard {
       return;
     }
     if (event.type === "error") {
-      this.sources.set("client", { state: "error", error: event.error || "Vitals stream error" });
+      this.sources.set("client", { state: "error", error: event.error || t("Vitals stream error") });
       this.renderSources();
     }
   }
@@ -1193,7 +1200,7 @@ class VitalsDashboard {
     if (this.alertMode === "history") {
       try {
         const response = await fetch("/api/vitals/alerts?include_resolved=true");
-        if (!response.ok) throw new Error(`Alert history request failed (${response.status})`);
+        if (!response.ok) throw new Error(t("Alert history request failed ({status})", { status: response.status }));
         const data = await response.json();
         this.alertHistory = (data.alerts || []).filter((alert) => alert.status === "resolved");
       } catch (error) {
@@ -1215,17 +1222,17 @@ class VitalsDashboard {
     }
     if (byId("vitalsAlertSummary")) {
       byId("vitalsAlertSummary").textContent = this.alertMode === "history"
-        ? `${rows.length} resolved incidents`
+        ? t("{count} resolved incidents", { count: rows.length })
         : count
-          ? `${this.alertSummary.active || 0} active · ${this.alertSummary.recovered || 0} awaiting confirmation`
-          : "No open alerts";
+          ? t("{active} active · {recovered} awaiting confirmation", { active: this.alertSummary.active || 0, recovered: this.alertSummary.recovered || 0 })
+          : t("No open alerts");
     }
     const root = byId("vitalsAlertList");
     clear(root);
     if (!rows.length) {
       const empty = document.createElement("div");
       empty.className = "vitals-empty vitals-alert-empty";
-      empty.textContent = this.alertMode === "history" ? "No resolved incidents" : "No open incidents";
+      empty.textContent = this.alertMode === "history" ? t("No resolved incidents") : t("No open incidents");
       root?.appendChild(empty);
       return;
     }
@@ -1242,20 +1249,20 @@ class VitalsDashboard {
     copy.className = "vitals-alert-copy";
     const heading = document.createElement("header");
     const title = document.createElement("strong");
-    title.textContent = alert.label || alert.sourceId || "Health alert";
+    title.textContent = alert.label || alert.sourceId || t("Health alert");
     const source = document.createElement("span");
     source.textContent = `${alert.sourceType || "source"} · ${alert.status || "active"}`;
     heading.append(title, source);
     const detail = document.createElement("p");
-    detail.textContent = alert.detail || "Health anomaly reported";
+    detail.textContent = alert.detail || t("Health anomaly reported");
     const meta = document.createElement("div");
     meta.className = "vitals-alert-meta";
     const firstSeen = document.createElement("span");
-    firstSeen.textContent = `Opened ${formatDateTime(alert.firstSeenAtMs)}`;
+    firstSeen.textContent = t("Opened {time}", { time: formatDateTime(alert.firstSeenAtMs) });
     const lastSeen = document.createElement("span");
     lastSeen.textContent = alert.conditionActive
-      ? `Last seen ${formatAge(alert.lastSeenAtMs)}`
-      : `Recovered ${formatDateTime(alert.recoveredAtMs)}`;
+      ? t("Last seen {age}", { age: formatAge(alert.lastSeenAtMs) })
+      : t("Recovered {time}", { time: formatDateTime(alert.recoveredAtMs) });
     meta.append(firstSeen, lastSeen);
     copy.append(heading, detail, meta);
 
@@ -1263,7 +1270,7 @@ class VitalsDashboard {
     if (alert.status === "resolved") {
       action = document.createElement("span");
       action.className = "health-label ok vitals-alert-action";
-      action.textContent = "Resolved";
+      action.textContent = t("Resolved");
     } else {
       action = document.createElement("button");
       action.type = "button";
@@ -1271,7 +1278,7 @@ class VitalsDashboard {
       action.disabled = Boolean(alert.conditionActive);
       action.appendChild(icon(alert.conditionActive ? AlertTriangle : CheckCircle2, 14));
       const label = document.createElement("span");
-      label.textContent = alert.conditionActive ? "Still active" : "Confirm resolved";
+      label.textContent = alert.conditionActive ? t("Still active") : t("Confirm resolved");
       action.appendChild(label);
       action.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -1299,7 +1306,7 @@ class VitalsDashboard {
         body: JSON.stringify({ operator: settings.userId || "operator" }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || `Resolve failed (${response.status})`);
+      if (!response.ok) throw new Error(data.detail || t("Resolve failed ({status})", { status: response.status }));
       this.handleAlerts({ ...data, notifyAlertIds: [] });
       if (this.alertMode === "history") await this.setAlertMode("history");
     } catch (error) {
@@ -1313,7 +1320,9 @@ class VitalsDashboard {
     const count = this.alertHistory.length;
     if (!count) return;
     const confirmed = window.confirm(
-      `Delete ${count} resolved incident${count === 1 ? "" : "s"} from local history? Open alerts are kept.`
+      t(count === 1
+        ? "Delete {count} resolved incident from local history? Open alerts are kept."
+        : "Delete {count} resolved incidents from local history? Open alerts are kept.", { count })
     );
     if (!confirmed) return;
     const button = byId("vitalsClearAlertHistory");
@@ -1326,7 +1335,7 @@ class VitalsDashboard {
         body: JSON.stringify({ operator: settings.userId || "operator" }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || `Clear history failed (${response.status})`);
+      if (!response.ok) throw new Error(data.detail || t("Clear history failed ({status})", { status: response.status }));
       this.handleAlerts({ ...data, notifyAlertIds: [] });
       await this.setAlertMode("history");
     } catch (error) {
@@ -1345,13 +1354,13 @@ class VitalsDashboard {
       this.currentAlert = alert;
       const dialog = layer.querySelector(".vitals-warning-dialog");
       dialog?.setAttribute("data-severity", safeHealth(alert.severity));
-      if (byId("vitalsWarningSeverity")) byId("vitalsWarningSeverity").textContent = safeHealth(alert.severity).toUpperCase();
-      if (byId("vitalsWarningTitle")) byId("vitalsWarningTitle").textContent = alert.label || "Robot alert";
-      if (byId("vitalsWarningDetail")) byId("vitalsWarningDetail").textContent = alert.detail || "A health anomaly requires attention.";
+      if (byId("vitalsWarningSeverity")) byId("vitalsWarningSeverity").textContent = t(safeHealth(alert.severity).toUpperCase());
+      if (byId("vitalsWarningTitle")) byId("vitalsWarningTitle").textContent = alert.label || t("Robot alert");
+      if (byId("vitalsWarningDetail")) byId("vitalsWarningDetail").textContent = alert.detail || t("A health anomaly requires attention.");
       if (byId("vitalsWarningSource")) byId("vitalsWarningSource").textContent = `${alert.sourceType}: ${alert.sourceId}`;
       if (byId("vitalsWarningTime")) byId("vitalsWarningTime").textContent = formatDateTime(alert.firstSeenAtMs);
       if (byId("vitalsWarningInspect")) {
-        byId("vitalsWarningInspect").textContent = alert.sourceType === "component" ? "Inspect component" : "Open alert center";
+        byId("vitalsWarningInspect").textContent = alert.sourceType === "component" ? t("Inspect component") : t("Open alert center");
       }
       layer.hidden = false;
       byId("vitalsWarningDismiss")?.focus();
@@ -1394,13 +1403,15 @@ class VitalsDashboard {
 
   renderDescription() {
     const description = this.description;
-    if (byId("vitalsRobotName")) byId("vitalsRobotName").textContent = description?.displayName || "Robot";
+    if (byId("vitalsRobotName")) byId("vitalsRobotName").textContent = description?.displayName || t("Robot");
     if (byId("vitalsRobotMeta")) {
-      byId("vitalsRobotMeta").textContent = description ? `${description.id} · ${description.family || "generic"}` : "Waiting for Soma";
+      byId("vitalsRobotMeta").textContent = description
+        ? t("{id} · {family}", { id: description.id, family: description.family || t("generic") })
+        : t("Waiting for Soma");
     }
-    if (byId("vitalsStageName")) byId("vitalsStageName").textContent = description?.displayName || "Robot";
+    if (byId("vitalsStageName")) byId("vitalsStageName").textContent = description?.displayName || t("Robot");
     if (byId("vitalsStageSelection")) {
-      byId("vitalsStageSelection").textContent = this.selectedComponent()?.label || description?.displayName || "Robot";
+      byId("vitalsStageSelection").textContent = this.selectedComponent()?.label || description?.displayName || t("Robot");
     }
     const dimensions = description?.dimensions;
     if (byId("vitalsStageDimensions")) {
@@ -1409,7 +1420,7 @@ class VitalsDashboard {
         : "--";
     }
     const count = description?.components?.length || 0;
-    if (byId("vitalsComponentCount")) byId("vitalsComponentCount").textContent = `${count} components`;
+    if (byId("vitalsComponentCount")) byId("vitalsComponentCount").textContent = t("{count} components", { count });
     this.renderComponents();
     this.renderInspector();
     this.renderStage();
@@ -1445,7 +1456,7 @@ class VitalsDashboard {
       const voltage = Number(power?.voltage);
       if (Number.isFinite(socPercent) && socPercent >= 0) parts.push(`${Math.round(socPercent)}%`);
       if (Number.isFinite(voltage) && voltage >= 0) parts.push(`${voltage.toFixed(1)} V`);
-      if (parts.length && power?.charging) parts.push("charging");
+      if (parts.length && power?.charging) parts.push(t("charging"));
       byId("vitalsBatterySummary").textContent = parts.join(" · ") || "--";
     }
     this.renderUpdatedAt();
@@ -1466,14 +1477,14 @@ class VitalsDashboard {
     this.sources.forEach((source, key) => {
       const node = document.createElement("span");
       node.className = `vitals-source ${source.state || "connecting"}`;
-      node.textContent = SOURCE_LABELS[key] || key;
+      node.textContent = t(SOURCE_LABELS[key] || key);
       if (source.error) node.title = source.error;
       root?.appendChild(node);
     });
   }
 
   renderStage() {
-    if (byId("vitalsRenderMode")) byId("vitalsRenderMode").textContent = `${this.renderMode} model`;
+    if (byId("vitalsRenderMode")) byId("vitalsRenderMode").textContent = t("{mode} model", { mode: t(this.renderMode) });
   }
 
   renderComponents() {
@@ -1484,7 +1495,7 @@ class VitalsDashboard {
     if (!components.length) {
       const empty = document.createElement("div");
       empty.className = "vitals-empty";
-      empty.textContent = "Waiting for robot description";
+      empty.textContent = t("Waiting for robot description");
       root?.appendChild(empty);
       return;
     }
@@ -1503,11 +1514,11 @@ class VitalsDashboard {
       const label = document.createElement("strong");
       label.textContent = component.label || component.localId || component.id;
       const type = document.createElement("span");
-      type.textContent = component.type || "component";
+      type.textContent = component.type || t("component");
       copy.append(label, type);
       const status = document.createElement("span");
       status.className = `vitals-status-dot ${safeHealth(healthMap.get(component.id))}`;
-      status.title = safeHealth(healthMap.get(component.id));
+      status.title = t(safeHealth(healthMap.get(component.id)));
       row.append(iconRoot, copy, status);
       row.addEventListener("click", () => this.selectComponent(component.id));
       root?.appendChild(row);
@@ -1539,45 +1550,45 @@ class VitalsDashboard {
     const health = this.selectedHealth();
     const root = byId("vitalsInspectorBody");
     clear(root);
-    if (byId("vitalsInspectorTitle")) byId("vitalsInspectorTitle").textContent = component?.label || "Robot";
+    if (byId("vitalsInspectorTitle")) byId("vitalsInspectorTitle").textContent = component?.label || t("Robot");
     if (byId("vitalsInspectorPath")) byId("vitalsInspectorPath").textContent = component?.id || "body";
     setHealthLabel(byId("vitalsInspectorHealth"), health?.visualState || health?.health || "unknown");
     if (!component) {
       const empty = document.createElement("div");
       empty.className = "vitals-empty";
-      empty.textContent = "Waiting for component data";
+      empty.textContent = t("Waiting for component data");
       root?.appendChild(empty);
       return;
     }
 
-    const identity = this.inspectorSection("Identity");
+    const identity = this.inspectorSection(t("Identity"));
     identity.append(
-      this.detailRow("Type", component.type),
-      this.detailRow("Parent", component.parentId || "root"),
-      this.detailRow("Providers", (component.providers || []).join(", ")),
-      this.detailRow("URDF link", component.urdfLink),
-      this.detailRow("URDF joint", component.urdfJoint),
+      this.detailRow(t("Type"), component.type),
+      this.detailRow(t("Parent"), component.parentId || t("root")),
+      this.detailRow(t("Providers"), (component.providers || []).join(", ")),
+      this.detailRow(t("URDF link"), component.urdfLink),
+      this.detailRow(t("URDF joint"), component.urdfJoint),
     );
     root?.appendChild(identity);
 
-    const status = this.inspectorSection("Status");
+    const status = this.inspectorSection(t("Status"));
     status.append(
-      this.detailRow("Aggregate health", health?.health || "unknown"),
-      this.detailRow("Direct health", health?.directHealth || "unknown"),
-      this.detailRow("Readiness", health?.visualState === "idle" ? "idle" : health?.health === "ok" ? "ready" : "attention"),
-      this.detailRow("Signals", String(health?.signalCount || 0)),
-      this.detailRow("Source", health?.sourceComponentId || component.id),
+      this.detailRow(t("Aggregate health"), t(health?.health || "unknown")),
+      this.detailRow(t("Direct health"), t(health?.directHealth || "unknown")),
+      this.detailRow(t("Readiness"), health?.visualState === "idle" ? t("idle") : health?.health === "ok" ? t("ready") : t("attention")),
+      this.detailRow(t("Signals"), String(health?.signalCount || 0)),
+      this.detailRow(t("Source"), health?.sourceComponentId || component.id),
     );
-    if (health?.detail) status.appendChild(this.detailRow("Detail", health.detail));
+    if (health?.detail) status.appendChild(this.detailRow(t("Detail"), health.detail));
     root?.appendChild(status);
 
-    const signalSection = this.inspectorSection("Signals");
+    const signalSection = this.inspectorSection(t("Signals"));
     const signalKeys = new Set(health?.signalKeys || []);
     const signals = (this.hardware?.signals || []).filter((signal) => signalKeys.has(signal.key));
     if (!signals.length) {
       const empty = document.createElement("div");
       empty.className = "vitals-empty";
-      empty.textContent = "No direct health signals";
+      empty.textContent = t("No direct health signals");
       signalSection.appendChild(empty);
     } else {
       signals.forEach((signal) => {
@@ -1611,8 +1622,8 @@ class VitalsDashboard {
       byId("vitalsSoftwareDetail").textContent = healthSummary(summary, isModules ? "modules" : "providers");
     }
     const headings = isModules
-      ? ["Module", "Health", "State / reason", "Source", "TTL"]
-      : ["Provider", "Health", "State", "Namespace", "Capabilities"];
+      ? [t("Module"), t("Health"), t("State / reason"), t("Source"), "TTL"]
+      : [t("Provider"), t("Health"), t("State"), t("Namespace"), t("Capabilities")];
     const head = document.createElement("div");
     head.className = "vitals-software-head";
     headings.forEach((heading) => {
@@ -1626,7 +1637,7 @@ class VitalsDashboard {
       const empty = document.createElement("div");
       empty.className = "vitals-empty";
       empty.style.padding = "14px 12px";
-      empty.textContent = isModules ? "No module health reports" : "No Atlas providers";
+      empty.textContent = isModules ? t("No module health reports") : t("No Atlas providers");
       root?.appendChild(empty);
       return;
     }
@@ -1641,10 +1652,10 @@ class VitalsDashboard {
       const dot = document.createElement("span");
       dot.className = `vitals-status-dot ${safeHealth(item.health)}`;
       const healthText = document.createElement("span");
-      healthText.textContent = safeHealth(item.health);
+      healthText.textContent = t(safeHealth(item.health));
       health.append(dot, healthText);
       const state = document.createElement("span");
-      state.textContent = isModules ? [item.state, item.reasonCode].filter(Boolean).join(" · ") : item.state || "unknown";
+      state.textContent = isModules ? [item.state, item.reasonCode].filter(Boolean).join(" · ") : t(item.state || "unknown");
       state.title = isModules ? item.detail || state.textContent : item.stateDetail || state.textContent;
       const source = document.createElement("span");
       source.textContent = isModules ? item.source || item.providerId || "--" : item.namespace || "--";

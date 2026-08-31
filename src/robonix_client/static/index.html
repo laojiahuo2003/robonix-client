@@ -4,48 +4,49 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Robonix Client</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260728b" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260831a" />
   </head>
   <body>
     <div class="app-shell">
       <aside class="nav-rail">
         <div class="brand">Robonix Client</div>
-        <nav class="nav-list" aria-label="Workspace">
-          <button class="nav-item active" type="button" data-page="dashboard"><span>Chat</span></button>
-          <button class="nav-item" type="button" data-page="vitals"><span>Vitals</span></button>
-          <button class="nav-item" type="button" data-page="audio"><span>Audio</span></button>
-          <button class="nav-item" type="button" data-page="settings"><span>Settings</span></button>
+        <nav class="nav-list" aria-label="Workspace" data-i18n-aria-label="Workspace">
+          <button class="nav-item active" type="button" data-page="dashboard"><span data-i18n="Chat">Chat</span></button>
+          <button class="nav-item" type="button" data-page="vitals"><span data-i18n="Vitals">Vitals</span></button>
+          <button class="nav-item" type="button" data-page="audio"><span data-i18n="Audio">Audio</span></button>
+          <button class="nav-item" type="button" data-page="settings"><span data-i18n="Settings">Settings</span></button>
+          <button class="nav-item lang-toggle" type="button" id="langToggle" data-i18n-title="Switch language">中文</button>
         </nav>
       </aside>
 
       <main class="workspace">
         <header class="command-bar">
           <div class="select-field wide">
-            <span>Session</span>
-            <input id="sessionTitleInput" autocomplete="off" placeholder="Untitled chat" title="Name of this session. Edit to rename it; New session creates one under this name." />
+            <span data-i18n="Session">Session</span>
+            <input id="sessionTitleInput" autocomplete="off" placeholder="Untitled chat" data-i18n-placeholder="Untitled chat" title="Name of this session. Edit to rename it; New session creates one under this name." data-i18n-title="Name of this session. Edit to rename it; New session creates one under this name." />
           </div>
-          <button class="new-session-button" type="button" id="newSessionAction" title="Start a fresh conversation under the name on the left. The robot's planner keeps history per session, so a new session clears it and stops resending old turns to the model."><span class="btn-icon" aria-hidden="true">＋</span><span class="btn-label">New session</span></button>
+          <button class="new-session-button" type="button" id="newSessionAction" title="Start a fresh conversation under the name on the left. The robot's planner keeps history per session, so a new session clears it and stops resending old turns to the model." data-i18n-title="Start a fresh conversation under the name on the left. The robot's planner keeps history per session, so a new session clears it and stops resending old turns to the model."><span class="btn-icon" aria-hidden="true">＋</span><span class="btn-label" data-i18n="New session">New session</span></button>
           <label class="select-field endpoint">
-            <span>Robot Host</span>
+            <span data-i18n="Robot Host">Robot Host</span>
             <input id="robotHost" autocomplete="off" placeholder="100.x.y.z" />
           </label>
           <label class="select-field">
-            <span>Atlas Port</span>
+            <span data-i18n="Atlas Port">Atlas Port</span>
             <input id="atlasPort" autocomplete="off" inputmode="numeric" placeholder="50051" />
           </label>
           <label class="select-field">
-            <span>User</span>
+            <span data-i18n="User">User</span>
             <input id="userId" autocomplete="off" placeholder="voice:client" />
           </label>
           <button class="status-chip" id="refreshSystem" type="button">
             <span class="dot"></span>
-            <span id="connectionState">offline</span>
+            <span id="connectionState" data-i18n="offline">offline</span>
           </button>
-          <button class="status-chip handsfree-chip offline" id="handsfreeToggle" type="button" title="Robot-local wake phrase configured by Speech">
+          <button class="status-chip handsfree-chip offline" id="handsfreeToggle" type="button" title="Robot-local wake phrase configured by Speech" data-i18n-title="Robot-local wake phrase configured by Speech">
             <span class="dot"></span>
-            <span id="handsfreeState">Hands-free off</span>
+            <span id="handsfreeState" data-i18n="Hands-free off">Hands-free off</span>
           </button>
-          <button class="button connect-button" id="connectNow" type="button">Connect</button>
+          <button class="button connect-button" id="connectNow" type="button" data-i18n="Connect">Connect</button>
         </header>
 
         <section class="page dashboard-page active" data-page-panel="dashboard">
@@ -53,12 +54,12 @@
             <section class="panel conversation-panel">
             <div class="panel-header">
               <div>
-                <h2>Conversation</h2>
-                <span id="promptTitle">What should Robonix do?</span>
+                <h2 data-i18n="Conversation">Conversation</h2>
+                <span id="promptTitle" data-i18n="What should Robonix do?">What should Robonix do?</span>
               </div>
               <div class="panel-actions">
-                <button class="ghost-button" id="renameSession" type="button">Rename</button>
-                <button class="ghost-button" id="clearHistory" type="button">Clear</button>
+                <button class="ghost-button" id="renameSession" type="button" data-i18n="Rename">Rename</button>
+                <button class="ghost-button" id="clearHistory" type="button" data-i18n="Clear">Clear</button>
               </div>
             </div>
             <div class="chat-body">
@@ -67,11 +68,11 @@
             </div>
             <form class="composer" id="composer">
               <div class="composer-row">
-                <textarea id="taskInput" rows="1" placeholder="Type a message..."></textarea>
-                <button class="tool-button voice-inline" type="button" data-page-action="voice-start" title="Start voice recording (F2)"><span class="btn-icon" aria-hidden="true">🎙</span><span class="btn-label">Start recording</span><kbd class="btn-key">F2</kbd></button>
-                <button class="tool-button finish-button" type="button" id="finishVoiceButton" title="Stop recording and send what you have said so far (F2). Does not cancel the task." hidden><span class="btn-icon" aria-hidden="true">⏹</span><span class="btn-label">Stop recording</span><kbd class="btn-key">F2</kbd></button>
-                <button class="danger-button stop-button" type="button" id="stopButton" title="Emergency stop: cancels every running task and any robot motion it started. Does not stop voice recording." hidden><span class="btn-icon" aria-hidden="true">⛔</span><span class="btn-label">Abort all tasks</span></button>
-                <button class="send-button" type="submit" id="sendButton" title="Send task (Enter)"><span class="btn-label">Send</span><kbd class="btn-key">Enter</kbd></button>
+                <textarea id="taskInput" rows="1" placeholder="Type a message..." data-i18n-placeholder="Type a message..."></textarea>
+                <button class="tool-button voice-inline" type="button" data-page-action="voice-start" title="Start voice recording (F2)" data-i18n-title="Start voice recording (F2)"><span class="btn-icon" aria-hidden="true">🎙</span><span class="btn-label" data-i18n="Start recording">Start recording</span><kbd class="btn-key">F2</kbd></button>
+                <button class="tool-button finish-button" type="button" id="finishVoiceButton" title="Stop recording and send what you have said so far (F2). Does not cancel the task." data-i18n-title="Stop recording and send what you have said so far (F2). Does not cancel the task." hidden><span class="btn-icon" aria-hidden="true">⏹</span><span class="btn-label" data-i18n="Stop recording">Stop recording</span><kbd class="btn-key">F2</kbd></button>
+                <button class="danger-button stop-button" type="button" id="stopButton" title="Emergency stop: cancels every running task and any robot motion it started. Does not stop voice recording." data-i18n-title="Emergency stop: cancels every running task and any robot motion it started. Does not stop voice recording." hidden><span class="btn-icon" aria-hidden="true">⛔</span><span class="btn-label" data-i18n="Abort all tasks">Abort all tasks</span></button>
+                <button class="send-button" type="submit" id="sendButton" title="Send task (Enter)" data-i18n-title="Send task (Enter)"><span class="btn-label" data-i18n="Send">Send</span><kbd class="btn-key">Enter</kbd></button>
               </div>
             </form>
             </section>
@@ -80,52 +81,52 @@
               <section class="panel current-goal-panel">
                 <div class="panel-header compact">
                   <div>
-                    <h2>Current Goal</h2>
-                    <span>Current task and selected goal context.</span>
+                    <h2 data-i18n="Current Goal">Current Goal</h2>
+                    <span data-i18n="Current task and selected goal context.">Current task and selected goal context.</span>
                   </div>
                 </div>
-                <div class="goal-line" id="goalLine">Goal: waiting for a task.</div>
+                <div class="goal-line" id="goalLine" data-i18n="Goal: waiting for a task.">Goal: waiting for a task.</div>
                 <div class="goal-preview" data-goal-preview></div>
               </section>
 
               <section class="panel rtdl-panel execution-panel">
                 <div class="panel-header">
                   <div>
-                    <h2>RTDL Forest</h2>
-                    <span data-plan-summary>waiting for real plan</span>
+                    <h2 data-i18n="RTDL Forest">RTDL Forest</h2>
+                    <span data-plan-summary data-i18n="waiting for real plan">waiting for real plan</span>
                   </div>
                 </div>
                 <button class="rtdl-history-launch active-rtdl-launch" id="openActiveRtdl" type="button">
                   <span>
-                    <strong>Active RTDL</strong>
-                    <small id="activeRtdlSummary">Open live Executor plans</small>
+                    <strong data-i18n="Active RTDL">Active RTDL</strong>
+                    <small id="activeRtdlSummary" data-i18n="Open live Executor plans">Open live Executor plans</small>
                   </span>
-                  <span class="rtdl-history-count" id="activeRtdlCount">unavailable</span>
+                  <span class="rtdl-history-count" id="activeRtdlCount" data-i18n="unavailable">unavailable</span>
                 </button>
                 <div class="execution-table">
                   <div class="table-head">
-                    <span>Node</span>
-                    <span>Type</span>
-                    <span>Status</span>
-                    <span>Provider / ID</span>
-                    <span>Duration</span>
-                    <span>Started</span>
+                    <span data-i18n="Node">Node</span>
+                    <span data-i18n="Type">Type</span>
+                    <span data-i18n="Status">Status</span>
+                    <span data-i18n="Provider / ID">Provider / ID</span>
+                    <span data-i18n="Duration">Duration</span>
+                    <span data-i18n="Started">Started</span>
                   </div>
                   <div class="plan-tree" data-plan-tree="full"></div>
                 </div>
                 <button class="rtdl-history-launch" id="openRtdlHistory" type="button">
                   <span>
-                    <strong>Execution history</strong>
-                    <small>Open completed RTDL plans in a full workspace</small>
+                    <strong data-i18n="Execution history">Execution history</strong>
+                    <small data-i18n="Open completed RTDL plans in a full workspace">Open completed RTDL plans in a full workspace</small>
                   </span>
                   <span class="rtdl-history-count" id="rtdlHistoryCount">0</span>
                 </button>
                 <div class="execution-detail" id="executionDetail">
-                  <div class="detail-title" id="executionDetailTitle">Node detail</div>
+                  <div class="detail-title" id="executionDetailTitle" data-i18n="Node detail">Node detail</div>
                   <div class="detail-grid">
-                    <div><span>Provider / ID</span><strong id="activeProvider">-</strong></div>
-                    <div><span>Started</span><strong id="activeStarted">-</strong></div>
-                    <div><span>Duration</span><strong id="activeDuration">-</strong></div>
+                    <div><span data-i18n="Provider / ID">Provider / ID</span><strong id="activeProvider">-</strong></div>
+                    <div><span data-i18n="Started">Started</span><strong id="activeStarted">-</strong></div>
+                    <div><span data-i18n="Duration">Duration</span><strong id="activeDuration">-</strong></div>
                   </div>
                   <pre class="args" id="activeArgs">{}</pre>
                 </div>
@@ -134,10 +135,10 @@
               <section class="panel trace-panel thought-panel">
                 <div class="panel-header">
                   <div>
-                    <h2>Event Log</h2>
-                    <span><span data-event-summary>0</span> event(s)</span>
+                    <h2 data-i18n="Event Log">Event Log</h2>
+                    <span><span data-event-summary>0</span> <span data-i18n="event(s)">event(s)</span></span>
                   </div>
-                  <span data-current-task-label>Current Task: idle</span>
+                  <span data-current-task-label data-i18n="Current Task: idle">Current Task: idle</span>
                 </div>
                 <div class="event-list" data-event-list></div>
               </section>
@@ -149,90 +150,90 @@
           <div class="vitals-shell" id="vitalsRoot">
             <header class="vitals-overview">
               <div class="vitals-identity">
-                <span class="vitals-eyebrow">Live robot</span>
+                <span class="vitals-eyebrow" data-i18n="Live robot">Live robot</span>
                 <div class="vitals-title-line">
-                  <h2 id="vitalsRobotName">Robot</h2>
-                  <span class="health-label unknown" id="vitalsOverallHealth">unknown</span>
+                  <h2 id="vitalsRobotName" data-i18n="Robot">Robot</h2>
+                  <span class="health-label unknown" id="vitalsOverallHealth" data-i18n="unknown">unknown</span>
                 </div>
-                <span id="vitalsRobotMeta">Waiting for Soma</span>
+                <span id="vitalsRobotMeta" data-i18n="Waiting for Soma">Waiting for Soma</span>
               </div>
-              <div class="vitals-overview-metrics" aria-label="Robot health summary">
+              <div class="vitals-overview-metrics" aria-label="Robot health summary" data-i18n-aria-label="Robot health summary">
                 <div class="vitals-overview-metric">
-                  <span>Hardware</span>
-                  <strong id="vitalsHardwareSummary">0 components</strong>
+                  <span data-i18n="Hardware">Hardware</span>
+                  <strong id="vitalsHardwareSummary" data-i18n="0 components">0 components</strong>
                 </div>
                 <div class="vitals-overview-metric">
-                  <span>Battery</span>
+                  <span data-i18n="Battery">Battery</span>
                   <strong id="vitalsBatterySummary">--</strong>
                 </div>
                 <div class="vitals-overview-metric">
-                  <span>Software</span>
-                  <strong id="vitalsSoftwareSummary">0 modules</strong>
+                  <span data-i18n="Software">Software</span>
+                  <strong id="vitalsSoftwareSummary" data-i18n="0 modules">0 modules</strong>
                 </div>
                 <div class="vitals-overview-metric">
-                  <span>Updated</span>
+                  <span data-i18n="Updated">Updated</span>
                   <strong id="vitalsUpdatedAt">--</strong>
                 </div>
               </div>
               <div class="vitals-overview-actions">
-                <div class="vitals-source-strip" id="vitalsSourceStrip" aria-label="Data source status"></div>
+                <div class="vitals-source-strip" id="vitalsSourceStrip" aria-label="Data source status" data-i18n-aria-label="Data source status"></div>
                 <button class="vitals-alert-button" id="vitalsAlertsOpen" type="button" aria-haspopup="dialog" aria-controls="vitalsAlertPanel">
                   <span id="vitalsAlertsIcon" aria-hidden="true"></span>
-                  <span>Alerts</span>
+                  <span data-i18n="Alerts">Alerts</span>
                   <strong id="vitalsAlertCount">0</strong>
                 </button>
-                <button class="icon-button vitals-refresh" id="vitalsReconnect" type="button" title="Reconnect health streams" aria-label="Reconnect health streams">
+                <button class="icon-button vitals-refresh" id="vitalsReconnect" type="button" title="Reconnect health streams" data-i18n-title="Reconnect health streams" aria-label="Reconnect health streams" data-i18n-aria-label="Reconnect health streams">
                   <span id="vitalsReconnectIcon" aria-hidden="true"></span>
                 </button>
               </div>
             </header>
 
             <div class="vitals-main">
-              <aside class="vitals-components-pane" aria-label="Robot components">
+              <aside class="vitals-components-pane" aria-label="Robot components" data-i18n-aria-label="Robot components">
                 <header class="vitals-pane-header">
                   <div>
-                    <h3>Body</h3>
-                    <span id="vitalsComponentCount">0 components</span>
+                    <h3 data-i18n="Body">Body</h3>
+                    <span id="vitalsComponentCount" data-i18n="0 components">0 components</span>
                   </div>
                 </header>
                 <div class="vitals-component-list" id="vitalsComponentList"></div>
               </aside>
 
-              <section class="vitals-stage" aria-label="Robot digital twin">
+              <section class="vitals-stage" aria-label="Robot digital twin" data-i18n-aria-label="Robot digital twin">
                 <div class="vitals-canvas" id="vitalsCanvas"></div>
                 <div class="vitals-stage-status">
                   <span class="vitals-live-dot"></span>
-                  <span id="vitalsRenderMode">procedural model</span>
+                  <span id="vitalsRenderMode" data-i18n="procedural model">procedural model</span>
                 </div>
                 <div class="vitals-stage-selection">
-                  <span>Selected component</span>
-                  <strong id="vitalsStageSelection">Robot</strong>
+                  <span data-i18n="Selected component">Selected component</span>
+                  <strong id="vitalsStageSelection" data-i18n="Robot">Robot</strong>
                 </div>
                 <div class="vitals-stage-caption">
-                  <strong id="vitalsStageName">Robot</strong>
+                  <strong id="vitalsStageName" data-i18n="Robot">Robot</strong>
                   <span id="vitalsStageDimensions">--</span>
                 </div>
               </section>
 
-              <aside class="vitals-inspector" aria-label="Selected component details">
+              <aside class="vitals-inspector" aria-label="Selected component details" data-i18n-aria-label="Selected component details">
                 <header class="vitals-pane-header">
                   <div>
-                    <h3 id="vitalsInspectorTitle">Robot</h3>
+                    <h3 id="vitalsInspectorTitle" data-i18n="Robot">Robot</h3>
                     <span id="vitalsInspectorPath">body</span>
                   </div>
-                  <span class="health-label unknown" id="vitalsInspectorHealth">unknown</span>
+                  <span class="health-label unknown" id="vitalsInspectorHealth" data-i18n="unknown">unknown</span>
                 </header>
                 <div class="vitals-inspector-body" id="vitalsInspectorBody"></div>
               </aside>
             </div>
 
-            <section class="vitals-software" aria-label="Software health">
+            <section class="vitals-software" aria-label="Software health" data-i18n-aria-label="Software health">
               <header class="vitals-software-header">
-                <div class="segmented-control" role="tablist" aria-label="Software health view">
-                  <button class="active" id="vitalsModulesTab" type="button" role="tab" aria-selected="true">Modules</button>
-                  <button id="vitalsProvidersTab" type="button" role="tab" aria-selected="false">Providers</button>
+                <div class="segmented-control" role="tablist" aria-label="Software health view" data-i18n-aria-label="Software health view">
+                  <button class="active" id="vitalsModulesTab" type="button" role="tab" aria-selected="true" data-i18n="Modules">Modules</button>
+                  <button id="vitalsProvidersTab" type="button" role="tab" aria-selected="false" data-i18n="Providers">Providers</button>
                 </div>
-                <span id="vitalsSoftwareDetail">Waiting for Vitals</span>
+                <span id="vitalsSoftwareDetail" data-i18n="Waiting for Vitals">Waiting for Vitals</span>
               </header>
               <div class="vitals-software-list" id="vitalsSoftwareList"></div>
             </section>
@@ -241,26 +242,26 @@
             </footer>
 
             <div class="vitals-alert-layer" id="vitalsAlertPanelLayer" hidden>
-              <button class="vitals-alert-scrim" id="vitalsAlertPanelScrim" type="button" aria-label="Close alert panel"></button>
+              <button class="vitals-alert-scrim" id="vitalsAlertPanelScrim" type="button" aria-label="Close alert panel" data-i18n-aria-label="Close alert panel"></button>
               <aside class="vitals-alert-panel" id="vitalsAlertPanel" role="dialog" aria-modal="true" aria-labelledby="vitalsAlertPanelTitle">
                 <header class="vitals-alert-panel-header">
                   <div>
-                    <span>Persistent incidents</span>
-                    <h3 id="vitalsAlertPanelTitle">Alert center</h3>
+                    <span data-i18n="Persistent incidents">Persistent incidents</span>
+                    <h3 id="vitalsAlertPanelTitle" data-i18n="Alert center">Alert center</h3>
                   </div>
-                  <button class="icon-button" id="vitalsAlertsClose" type="button" title="Close alert panel" aria-label="Close alert panel">
+                  <button class="icon-button" id="vitalsAlertsClose" type="button" title="Close alert panel" data-i18n-title="Close alert panel" aria-label="Close alert panel" data-i18n-aria-label="Close alert panel">
                     <span id="vitalsAlertsCloseIcon" aria-hidden="true"></span>
                   </button>
                 </header>
                 <div class="vitals-alert-toolbar">
-                  <div class="segmented-control" role="tablist" aria-label="Alert view">
-                    <button class="active" id="vitalsOpenAlertsTab" type="button" role="tab" aria-selected="true">Open</button>
-                    <button id="vitalsAlertHistoryTab" type="button" role="tab" aria-selected="false">History</button>
+                  <div class="segmented-control" role="tablist" aria-label="Alert view" data-i18n-aria-label="Alert view">
+                    <button class="active" id="vitalsOpenAlertsTab" type="button" role="tab" aria-selected="true" data-i18n="Open">Open</button>
+                    <button id="vitalsAlertHistoryTab" type="button" role="tab" aria-selected="false" data-i18n="History">History</button>
                   </div>
                   <div class="vitals-alert-toolbar-actions">
-                    <span id="vitalsAlertSummary">No open alerts</span>
+                    <span id="vitalsAlertSummary" data-i18n="No open alerts">No open alerts</span>
                     <button class="secondary-button vitals-alert-clear-history" id="vitalsClearAlertHistory" type="button" hidden>
-                      Clear history
+                      <span data-i18n="Clear history">Clear history</span>
                     </button>
                   </div>
                 </div>
@@ -274,17 +275,17 @@
                   <span class="vitals-warning-icon" id="vitalsWarningIcon" aria-hidden="true"></span>
                   <div>
                     <span id="vitalsWarningSeverity">ERROR</span>
-                    <h3 id="vitalsWarningTitle">Robot alert</h3>
+                    <h3 id="vitalsWarningTitle" data-i18n="Robot alert">Robot alert</h3>
                   </div>
                 </header>
-                <p id="vitalsWarningDetail">A health anomaly requires attention.</p>
+                <p id="vitalsWarningDetail" data-i18n="A health anomaly requires attention.">A health anomaly requires attention.</p>
                 <div class="vitals-warning-meta">
                   <span id="vitalsWarningSource">component</span>
-                  <span id="vitalsWarningTime">now</span>
+                  <span id="vitalsWarningTime" data-i18n="now">now</span>
                 </div>
                 <footer>
-                  <button class="secondary-button" id="vitalsWarningDismiss" type="button">Dismiss</button>
-                  <button class="primary-button" id="vitalsWarningInspect" type="button">Inspect</button>
+                  <button class="secondary-button" id="vitalsWarningDismiss" type="button" data-i18n="Dismiss">Dismiss</button>
+                  <button class="primary-button" id="vitalsWarningInspect" type="button" data-i18n="Inspect">Inspect</button>
                 </footer>
               </section>
             </div>
@@ -297,15 +298,15 @@
             <section class="panel audio-panel">
               <div class="panel-header">
                 <div>
-                  <h2>Audio Device Server</h2>
-                  <span id="audioServerSummary">Client-machine audio device server is not checked yet.</span>
+                  <h2 data-i18n="Audio Device Server">Audio Device Server</h2>
+                  <span id="audioServerSummary" data-i18n="Client-machine audio device server is not checked yet.">Client-machine audio device server is not checked yet.</span>
                 </div>
-                <span id="audioServerState">offline</span>
+                <span id="audioServerState" data-i18n="offline">offline</span>
               </div>
               <div class="audio-actions">
-                <button class="button" id="startAudioServer" type="button">Start Audio</button>
-                <button class="button" id="checkAudioServer" type="button">Check</button>
-                <button class="button" id="refreshAudioDevices" type="button">Refresh Devices</button>
+                <button class="button" id="startAudioServer" type="button" data-i18n="Start Audio">Start Audio</button>
+                <button class="button" id="checkAudioServer" type="button" data-i18n="Check">Check</button>
+                <button class="button" id="refreshAudioDevices" type="button" data-i18n="Refresh Devices">Refresh Devices</button>
               </div>
               <div class="audio-status-grid" id="audioServerStatus"></div>
             </section>
@@ -313,57 +314,57 @@
             <section class="panel audio-panel">
               <div class="panel-header">
                 <div>
-                  <h2>Robonix Audio Route</h2>
-                  <span>Select the primitive and device used by F2 and hands-free interaction.</span>
+                  <h2 data-i18n="Robonix Audio Route">Robonix Audio Route</h2>
+                  <span data-i18n="Select the primitive and device used by F2 and hands-free interaction.">Select the primitive and device used by F2 and hands-free interaction.</span>
                 </div>
               </div>
               <div class="audio-device-grid">
                 <label class="field">
-                  <span>Input Primitive</span>
+                  <span data-i18n="Input Primitive">Input Primitive</span>
                   <select id="micNodeId"></select>
                 </label>
                 <label class="field">
-                  <span>Input Device</span>
+                  <span data-i18n="Input Device">Input Device</span>
                   <select id="micDeviceId"></select>
                 </label>
                 <label class="field">
-                  <span>Output Primitive</span>
+                  <span data-i18n="Output Primitive">Output Primitive</span>
                   <select id="speakerNodeId"></select>
                 </label>
                 <label class="field">
-                  <span>Output Device</span>
+                  <span data-i18n="Output Device">Output Device</span>
                   <select id="speakerDeviceId"></select>
                 </label>
               </div>
               <div class="audio-device-actions">
-                <button class="button" id="refreshAudioRoute" type="button">Refresh Route</button>
-                <button class="button" id="applyAudioRoute" type="button">Apply Route</button>
+                <button class="button" id="refreshAudioRoute" type="button" data-i18n="Refresh Route">Refresh Route</button>
+                <button class="button" id="applyAudioRoute" type="button" data-i18n="Apply Route">Apply Route</button>
               </div>
-              <span class="audio-route-status" id="audioRouteStatus">No Robonix audio route loaded.</span>
+              <span class="audio-route-status" id="audioRouteStatus" data-i18n="No Robonix audio route loaded.">No Robonix audio route loaded.</span>
             </section>
 
             <section class="panel audio-panel">
               <div class="panel-header">
                 <div>
-                  <h2>Client Bridge Diagnostics</h2>
-                  <span>Current local devices used when Audio Route selects the client bridge.</span>
+                  <h2 data-i18n="Client Bridge Diagnostics">Client Bridge Diagnostics</h2>
+                  <span data-i18n="Current local devices used when Audio Route selects the client bridge.">Current local devices used when Audio Route selects the client bridge.</span>
                 </div>
               </div>
               <div class="audio-device-grid audio-device-readout">
                 <div class="field">
-                  <span>Microphone</span>
-                  <strong id="bridgeInputDevice">Not selected</strong>
+                  <span data-i18n="Microphone">Microphone</span>
+                  <strong id="bridgeInputDevice" data-i18n="Not selected">Not selected</strong>
                 </div>
                 <div class="field">
-                  <span>Speaker</span>
-                  <strong id="bridgeOutputDevice">Not selected</strong>
+                  <span data-i18n="Speaker">Speaker</span>
+                  <strong id="bridgeOutputDevice" data-i18n="Not selected">Not selected</strong>
                 </div>
               </div>
               <div class="audio-device-actions">
-                <button class="button" id="testMicrophone" type="button">Test Microphone</button>
-                <button class="button" id="testSpeaker" type="button">Test Speaker</button>
+                <button class="button" id="testMicrophone" type="button" data-i18n="Test Microphone">Test Microphone</button>
+                <button class="button" id="testSpeaker" type="button" data-i18n="Test Speaker">Test Speaker</button>
               </div>
-              <span class="audio-test-status" id="audioTestStatus" role="status">
+              <span class="audio-test-status" id="audioTestStatus" role="status" data-i18n="Run a microphone or speaker test to verify the selected route.">
                 Run a microphone or speaker test to verify the selected route.
               </span>
             </section>
@@ -371,10 +372,10 @@
             <section class="panel audio-panel audio-meter-panel">
               <div class="panel-header">
                 <div>
-                  <h2>Input Level</h2>
+                  <h2 data-i18n="Input Level">Input Level</h2>
                   <span id="audioLevelText">0%</span>
                 </div>
-                <span id="audioLevelState">idle</span>
+                <span id="audioLevelState" data-i18n="idle">idle</span>
               </div>
               <div class="audio-meter">
                 <span id="audioLevelBar"></span>
@@ -385,24 +386,24 @@
             <section class="panel enroll-panel">
               <div class="panel-header">
                 <div>
-                  <h2>Voiceprint</h2>
-                  <span id="enrollState">ready</span>
+                  <h2 data-i18n="Voiceprint">Voiceprint</h2>
+                  <span id="enrollState" data-i18n="ready">ready</span>
                 </div>
               </div>
               <div class="form-grid compact">
                 <label class="field">
-                  <span>User ID</span>
+                  <span data-i18n="User ID">User ID</span>
                   <input id="enrollUserId" placeholder="wheatfox" />
                 </label>
                 <label class="field">
-                  <span>User Name</span>
-                  <input id="enrollUserName" placeholder="Client User" />
+                  <span data-i18n="User Name">User Name</span>
+                  <input id="enrollUserName" placeholder="Client User" data-i18n-placeholder="Client User" />
                 </label>
                 <label class="field">
-                  <span>Record Seconds</span>
+                  <span data-i18n="Record Seconds">Record Seconds</span>
                   <input id="recordSeconds" type="number" min="2" max="30" step="1" />
                 </label>
-                <button class="button form-button" id="enrollVoice" type="button">Enroll Voice</button>
+                <button class="button form-button" id="enrollVoice" type="button" data-i18n="Enroll Voice">Enroll Voice</button>
               </div>
             </section>
             </section>
@@ -411,8 +412,8 @@
             <section class="panel audio-log-panel">
               <div class="panel-header">
                 <div>
-                  <h2>Audio Log</h2>
-                  <span id="audioLogSummary">Audio device log.</span>
+                  <h2 data-i18n="Audio Log">Audio Log</h2>
+                  <span id="audioLogSummary" data-i18n="Audio device log.">Audio device log.</span>
                 </div>
               </div>
               <pre class="audio-log" id="audioLog"></pre>
@@ -426,36 +427,36 @@
             <section class="panel">
               <div class="panel-header">
                 <div>
-                  <h2>Connection</h2>
-                  <span>Saved only in this client browser.</span>
+                  <h2 data-i18n="Connection">Connection</h2>
+                  <span data-i18n="Saved only in this client browser.">Saved only in this client browser.</span>
                 </div>
               </div>
               <div class="form-grid">
                 <label class="field">
-                  <span>Robot Host</span>
+                  <span data-i18n="Robot Host">Robot Host</span>
                   <input id="robotHostSettings" autocomplete="off" placeholder="100.x.y.z" />
                 </label>
                 <label class="field">
-                  <span>Atlas Port</span>
+                  <span data-i18n="Atlas Port">Atlas Port</span>
                   <input id="atlasPortSettings" autocomplete="off" inputmode="numeric" placeholder="50051" />
                 </label>
                 <label class="field">
-                  <span>Liaison Endpoint</span>
-                  <input id="liaisonEndpoint" autocomplete="off" placeholder="Auto-discover from Atlas" />
+                  <span data-i18n="Liaison Endpoint">Liaison Endpoint</span>
+                  <input id="liaisonEndpoint" autocomplete="off" placeholder="Auto-discover from Atlas" data-i18n-placeholder="Auto-discover from Atlas" />
                 </label>
                 <label class="field">
-                  <span>User ID</span>
+                  <span data-i18n="User ID">User ID</span>
                   <input id="settingsUserId" autocomplete="off" placeholder="voice:client" />
                 </label>
                 <label class="field">
-                  <span>Voice Record Limit (s)</span>
+                  <span data-i18n="Voice Record Limit (s)">Voice Record Limit (s)</span>
                   <input id="settingsRecordSeconds" type="number" min="2" max="60" step="1" />
                 </label>
               </div>
               <div class="audio-device-actions">
-                <button class="button" id="saveClientSettings" type="button">Save Settings</button>
+                <button class="button" id="saveClientSettings" type="button" data-i18n="Save Settings">Save Settings</button>
               </div>
-              <span class="audio-route-status" id="settingsStatus">Changes are saved locally.</span>
+              <span class="audio-route-status" id="settingsStatus" data-i18n="Changes are saved locally.">Changes are saved locally.</span>
             </section>
           </section>
         </section>
@@ -466,10 +467,10 @@
       <section class="active-rtdl-modal">
         <header class="rtdl-history-modal-header">
           <div>
-            <h2 id="activeRtdlTitle">Active RTDL</h2>
-            <span id="activeRtdlModalSummary">Live plans reported by Executor</span>
+            <h2 id="activeRtdlTitle" data-i18n="Active RTDL">Active RTDL</h2>
+            <span id="activeRtdlModalSummary" data-i18n="Live plans reported by Executor">Live plans reported by Executor</span>
           </div>
-          <button class="icon-button modal-close" id="closeActiveRtdl" type="button" aria-label="Close active RTDL">×</button>
+          <button class="icon-button modal-close" id="closeActiveRtdl" type="button" aria-label="Close active RTDL" data-i18n-aria-label="Close active RTDL">×</button>
         </header>
         <div class="active-rtdl-modal-body" id="activeRtdlList" aria-live="polite"></div>
       </section>
@@ -479,27 +480,28 @@
       <section class="rtdl-history-modal">
         <header class="rtdl-history-modal-header">
           <div>
-            <h2 id="rtdlHistoryTitle">Execution history</h2>
-            <span>Completed RTDL plans for this client session</span>
+            <h2 id="rtdlHistoryTitle" data-i18n="Execution history">Execution history</h2>
+            <span data-i18n="Completed RTDL plans for this client session">Completed RTDL plans for this client session</span>
           </div>
-          <button class="icon-button modal-close" id="closeRtdlHistory" type="button" aria-label="Close execution history">×</button>
+          <button class="icon-button modal-close" id="closeRtdlHistory" type="button" aria-label="Close execution history" data-i18n-aria-label="Close execution history">×</button>
         </header>
         <div class="rtdl-history-modal-body">
           <div class="history-plan-tree" id="rtdlHistoryTrees"></div>
           <aside class="history-execution-detail">
-            <div class="detail-title" id="historyExecutionDetailTitle">Node detail</div>
+            <div class="detail-title" id="historyExecutionDetailTitle" data-i18n="Node detail">Node detail</div>
             <div class="detail-grid history-detail-grid">
-              <div><span>Provider / ID</span><strong id="historyActiveProvider">-</strong></div>
-              <div><span>Started</span><strong id="historyActiveStarted">-</strong></div>
-              <div><span>Duration</span><strong id="historyActiveDuration">-</strong></div>
+              <div><span data-i18n="Provider / ID">Provider / ID</span><strong id="historyActiveProvider">-</strong></div>
+              <div><span data-i18n="Started">Started</span><strong id="historyActiveStarted">-</strong></div>
+              <div><span data-i18n="Duration">Duration</span><strong id="historyActiveDuration">-</strong></div>
             </div>
-            <pre class="args history-args" id="historyActiveArgs">Select an RTDL node to inspect its arguments and result.</pre>
+            <pre class="args history-args" id="historyActiveArgs" data-i18n="Select an RTDL node to inspect its arguments and result.">Select an RTDL node to inspect its arguments and result.</pre>
           </aside>
         </div>
       </section>
     </div>
 
-    <script src="/static/app.js?v=20260717a"></script>
-    <script src="/static/vitals.bundle.js?v=20260728b"></script>
+    <script src="/static/i18n.js?v=20260831a"></script>
+    <script src="/static/app.js?v=20260831a"></script>
+    <script src="/static/vitals.bundle.js?v=20260831a"></script>
   </body>
 </html>

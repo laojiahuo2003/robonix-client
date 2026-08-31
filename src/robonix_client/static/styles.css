@@ -148,6 +148,12 @@ select {
   color: #d9f3ff;
 }
 
+.nav-item.lang-toggle {
+  margin-top: 10px;
+  border-color: #24404e;
+  text-align: center;
+}
+
 .panel-header span,
 .field span,
 .metric span,
