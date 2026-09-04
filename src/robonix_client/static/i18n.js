@@ -503,10 +503,15 @@
   }
 
   function renderToggle() {
-    const button = document.getElementById("langToggle");
-    if (!button) return;
-    button.textContent = current === "zh" ? "EN" : "中文";
-    button.title = t("Switch language");
+    const group = document.getElementById("langSwitch");
+    if (!group) return;
+    group.dataset.active = current;
+    group.querySelectorAll(".lang-option").forEach((option) => {
+      const selected = option.dataset.lang === current;
+      option.classList.toggle("active", selected);
+      option.setAttribute("aria-pressed", String(selected));
+    });
+    group.title = t("Switch language");
   }
 
   function setLang(lang) {
@@ -532,7 +537,10 @@
   };
 
   document.documentElement.lang = current === "zh" ? "zh-CN" : "en";
-  document.getElementById("langToggle")?.addEventListener("click", () => window.RobonixI18N.toggle());
+  document.getElementById("langSwitch")?.addEventListener("click", (event) => {
+    const option = event.target.closest("[data-lang]");
+    if (option) window.RobonixI18N.setLang(option.dataset.lang);
+  });
   applyDocument();
   renderToggle();
 })();
