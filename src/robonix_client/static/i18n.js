@@ -19,6 +19,7 @@
     "Audio": "音频",
     "Settings": "设置",
     "Switch language": "切换语言",
+    "Robonix Client": "Robonix 客户端",
     "Session": "会话",
     "Untitled chat": "未命名会话",
     "Name of this session. Edit to rename it; New session creates one under this name.": "此会话的名称。编辑即可重命名；“新建会话”会以此名称创建新会话。",
@@ -196,8 +197,6 @@
     "{count} components": "{count} 个组件",
     "0 components": "0 个组件",
     "0 modules": "0 个模块",
-    "{count} modules": "{count} 个模块",
-    "{count} providers": "{count} 个提供者",
     "procedural model": "程序化模型",
     "{mode} model": "{mode} 模型",
     "Selected component": "已选组件",
@@ -227,7 +226,6 @@
     "Inspect component": "查看组件",
     "Open alert center": "打开告警中心",
     "ok": "正常",
-    "idle": "空闲",
     "stale": "数据过期",
     "warn": "警告",
     "error": "错误",
@@ -279,7 +277,6 @@
     "Module": "模块",
     "Health": "健康",
     "State / reason": "状态 / 原因",
-    "TTL": "TTL",
     "State": "状态",
     "Namespace": "命名空间",
     "Capabilities": "能力",
@@ -450,7 +447,6 @@
     "in_progress": "进行中",
     "planning": "规划中",
     "executing": "执行中",
-    "done": "完成",
     "completed": "已完成",
     "cancelled": "已取消",
     "canceled": "已取消",
@@ -484,6 +480,7 @@
   }
 
   function applyDocument() {
+    document.title = t("Robonix Client");
     document.querySelectorAll("[data-i18n]").forEach((node) => {
       node.textContent = t(node.dataset.i18n);
     });

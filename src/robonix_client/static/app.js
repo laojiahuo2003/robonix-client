@@ -2029,7 +2029,9 @@ function renderGoalPanel() {
     card.className = "goal-card";
     const source = document.createElement("span");
     source.className = `goal-source${context?.source === "Executor verified" ? " verified" : ""}`;
-    source.textContent = context?.source || (state.executorPlansReady ? t("Executor verified") : t("Executor unavailable"));
+    source.textContent = context?.source
+      ? t(context.source)
+      : (state.executorPlansReady ? t("Executor verified") : t("Executor unavailable"));
     const title = document.createElement("strong");
     title.textContent = active?.call?.name
       || context?.op?.description
@@ -2171,7 +2173,7 @@ function renderRobotState(data) {
   if (!document.querySelector("[data-robot-state-list]")) return;
   const contracts = data.requiredContracts || [];
   const summary = data.summary || {};
-  const recording = maybe("voiceState") ? $("voiceState").textContent === "recording" : false;
+  const recording = Boolean(state.voiceRecording);
   const audioReady = contractAvailable(contracts, "Speaker") || contractAvailable(contracts, "TTS");
   const rows = [
     { label: t("Base"), icon: "B", ok: contractAvailable(contracts, "Executor") || contractAvailable(contracts, "Liaison submit"), status: t("OK"), value: "0.00 m/s", source: "mock" },
@@ -3122,7 +3124,7 @@ function clear(node) {
 /// it shows the live session title once one exists.
 function handleI18nChange() {
   if (maybe("promptTitle")) {
-    $("promptTitle").textContent = state.sessionTitle || t(t("What should Robonix do?"));
+    $("promptTitle").textContent = state.sessionTitle || t("What should Robonix do?");
   }
   renderSessionChip();
   renderMessages();
@@ -3131,6 +3133,8 @@ function handleI18nChange() {
   renderActivePlans();
   renderHistory();
   renderHandsfree();
+  syncVoiceControls();
+  setText("voiceState", state.voiceRecording ? t("recording") : t("ready"));
   if (state.lastSystemData) renderSystem(state.lastSystemData);
   setBusy(state.busy);
 }
