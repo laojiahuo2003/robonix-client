@@ -39,8 +39,13 @@ const SOURCE_LABELS = {
 };
 
 /// Translate a UI string via the shared i18n.js table. Keys are the English
-/// source text; falls back to the raw key when i18n.js has not loaded.
-const t = (key, params) => (window.RobonixI18N ? window.RobonixI18N.t(key, params) : String(key ?? ""));
+/// source text; falls back to the raw key (placeholders interpolated) when
+/// i18n.js has not loaded.
+const t = (key, params) => (window.RobonixI18N
+  ? window.RobonixI18N.t(key, params)
+  : String(key ?? "").replace(/\{([a-zA-Z0-9_]+)\}/g, (whole, name) => (
+    params && params[name] !== undefined && params[name] !== null ? String(params[name]) : whole
+  )));
 
 const byId = (id) => document.getElementById(id);
 

@@ -2,8 +2,13 @@ const $ = (id) => document.getElementById(id);
 const maybe = (id) => document.getElementById(id);
 
 /// Translate a UI string. Keys are the English source text; i18n.js maps
-/// them for zh-CN. Falls back to the raw key if i18n.js has not loaded.
-const t = (key, params) => (window.RobonixI18N ? window.RobonixI18N.t(key, params) : String(key ?? ""));
+/// them for zh-CN. Falls back to the raw key (placeholders interpolated)
+/// if i18n.js has not loaded.
+const t = (key, params) => (window.RobonixI18N
+  ? window.RobonixI18N.t(key, params)
+  : String(key ?? "").replace(/\{([a-zA-Z0-9_]+)\}/g, (whole, name) => (
+    params && params[name] !== undefined && params[name] !== null ? String(params[name]) : whole
+  )));
 
 const state = {
   settings: {},
@@ -53,6 +58,7 @@ const state = {
     inputCurrent: null,
     outputCurrent: null,
     vuSocket: null,
+    vuState: "idle",
     logSocket: null,
     logLines: [],
     levelHistory: Array(28).fill(0),
@@ -1778,6 +1784,7 @@ async function refreshActivePlans() {
 }
 
 function renderActivePlans(error = "") {
+  state.activePlansError = error;
   const root = maybe("activeRtdlList");
   const count = maybe("activeRtdlCount");
   const summary = maybe("activeRtdlSummary");
@@ -2780,6 +2787,7 @@ function startAudioVuStream() {
   const socket = new WebSocket(url);
   state.audio.vuSocket = socket;
   socket.onopen = () => {
+    state.audio.vuState = "live";
     setText("audioLevelState", t("live"));
     appendAudioLog(t("VU connected"));
   };
@@ -2794,8 +2802,12 @@ function startAudioVuStream() {
       renderAudioLevel(0, 0);
     }
   };
-  socket.onerror = () => setText("audioLevelState", t("offline"));
+  socket.onerror = () => {
+    state.audio.vuState = "offline";
+    setText("audioLevelState", t("offline"));
+  };
   socket.onclose = () => {
+    state.audio.vuState = "offline";
     setText("audioLevelState", t("offline"));
     state.audio.vuSocket = null;
   };
@@ -3130,11 +3142,12 @@ function handleI18nChange() {
   renderMessages();
   renderTimeline();
   renderPlan();
-  renderActivePlans();
+  renderActivePlans(state.activePlansError);
   renderHistory();
   renderHandsfree();
   syncVoiceControls();
   setText("voiceState", state.voiceRecording ? t("recording") : t("ready"));
+  setText("audioLevelState", t(state.audio.vuState));
   if (state.lastSystemData) renderSystem(state.lastSystemData);
   setBusy(state.busy);
 }
