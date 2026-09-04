@@ -40,7 +40,7 @@ const SOURCE_LABELS = {
 
 /// Translate a UI string via the shared i18n.js table. Keys are the English
 /// source text; falls back to the raw key when i18n.js has not loaded.
-const t = (key, params) => (window.RobonixI18N ? window.RobonixI18N.t(key, params) : key);
+const t = (key, params) => (window.RobonixI18N ? window.RobonixI18N.t(key, params) : String(key ?? ""));
 
 const byId = (id) => document.getElementById(id);
 

@@ -3,7 +3,7 @@ const maybe = (id) => document.getElementById(id);
 
 /// Translate a UI string. Keys are the English source text; i18n.js maps
 /// them for zh-CN. Falls back to the raw key if i18n.js has not loaded.
-const t = (key, params) => (window.RobonixI18N ? window.RobonixI18N.t(key, params) : key);
+const t = (key, params) => (window.RobonixI18N ? window.RobonixI18N.t(key, params) : String(key ?? ""));
 
 const state = {
   settings: {},

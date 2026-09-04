@@ -475,7 +475,10 @@
 
   function t(key, params) {
     const source = String(key ?? "");
-    const translated = current === "zh" && Object.hasOwn(zhCN, source) ? zhCN[source] : source;
+    // hasOwnProperty.call instead of Object.hasOwn: the latter is ES2022 and
+    // throws on older browsers (e.g. Safari < 15.4), killing all translations.
+    const has = Object.prototype.hasOwnProperty.call(zhCN, source);
+    const translated = current === "zh" && has ? zhCN[source] : source;
     return interpolate(translated, params);
   }
 
