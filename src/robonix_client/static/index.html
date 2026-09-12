@@ -12,6 +12,7 @@
         <div class="brand">Robonix Client</div>
         <nav class="nav-list" aria-label="Workspace">
           <button class="nav-item active" type="button" data-page="dashboard"><span>Chat</span></button>
+          <button class="nav-item" type="button" data-page="perception"><span>Perception</span></button>
           <button class="nav-item" type="button" data-page="vitals"><span>Vitals</span></button>
           <button class="nav-item" type="button" data-page="audio"><span>Audio</span></button>
           <button class="nav-item" type="button" data-page="settings"><span>Settings</span></button>
@@ -143,6 +144,67 @@
               </section>
             </section>
           </section>
+        </section>
+
+        <section class="page perception-page" data-page-panel="perception" aria-labelledby="perceptionTitle">
+          <div class="perception-shell">
+            <header class="perception-header">
+              <div class="perception-title-line">
+                <span class="perception-eyebrow">Live sensors</span>
+                <h2 id="perceptionTitle">Perception</h2>
+              </div>
+              <div class="perception-source-strip" id="perceptionSourceStrip" aria-label="Data source status"></div>
+            </header>
+            <div class="perception-grid" id="perceptionGrid">
+              <section class="perception-tile" data-tile="camera">
+                <header class="perception-tile-header">
+                  <h3>Camera</h3>
+                  <span class="perception-tile-meta" data-tile-meta></span>
+                </header>
+                <div class="perception-tile-body perception-camera-body">
+                  <img class="perception-camera-img" data-camera-img alt="RGB camera" draggable="false" />
+                </div>
+              </section>
+              <section class="perception-tile" data-tile="depth">
+                <header class="perception-tile-header">
+                  <h3>Depth</h3>
+                  <span class="perception-tile-meta" data-tile-meta></span>
+                </header>
+                <div class="perception-tile-body perception-camera-body">
+                  <img class="perception-camera-img" data-depth-img alt="Depth camera" draggable="false" />
+                </div>
+              </section>
+              <section class="perception-tile" data-tile="lidar">
+                <header class="perception-tile-header">
+                  <h3>Lidar</h3>
+                  <span class="perception-tile-meta" data-tile-meta></span>
+                </header>
+                <div class="perception-tile-body perception-canvas-body">
+                  <canvas class="perception-canvas" data-lidar-canvas></canvas>
+                </div>
+              </section>
+              <section class="perception-tile perception-tile-wide" data-tile="scene">
+                <header class="perception-tile-header">
+                  <h3>Scene map</h3>
+                  <div class="perception-tile-actions">
+                    <div class="perception-layers" role="group" aria-label="Map layers">
+                      <label class="perception-layer"><input type="checkbox" data-scene-layer="map" checked />map</label>
+                      <label class="perception-layer"><input type="checkbox" data-scene-layer="regions" checked />regions</label>
+                      <label class="perception-layer"><input type="checkbox" data-scene-layer="objects" checked />objects</label>
+                      <label class="perception-layer"><input type="checkbox" data-scene-layer="robot" checked />robot</label>
+                    </div>
+                    <span class="perception-tile-meta" data-tile-meta></span>
+                  </div>
+                </header>
+                <div class="perception-tile-body perception-canvas-body">
+                  <canvas class="perception-canvas" data-scene-canvas></canvas>
+                </div>
+              </section>
+            </div>
+            <div class="perception-empty" id="perceptionEmpty" hidden>
+              <p>This deployment exposes no sensor or spatial data the client can display.</p>
+            </div>
+          </div>
         </section>
 
         <section class="page vitals-page" data-page-panel="vitals" aria-labelledby="vitalsRobotName">

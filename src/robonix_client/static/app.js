@@ -271,6 +271,7 @@ async function init() {
   rememberLastSession(state.sessionId);
   bindSettings();
   bindEvents();
+  bindSceneLayers();
   renderAudioBars();
   renderHistory();
   renderMessages();
@@ -3091,5 +3092,527 @@ function setTextAll(selector, text) {
 function clear(node) {
   while (node.firstChild) node.removeChild(node.firstChild);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Perception page — adaptive sensor / spatial visualisation driven by Atlas.
+//
+// Each tile is gated on whether the connected deployment exposes the matching
+// MCP contract (camera/lidar/scene snapshots).  Tiles whose data is only
+// published on ROS 2 (transport=2) are not reachable from the host-side
+// client, so the availability probe simply reports them offline and the UI
+// hides them instead of rendering a broken tile.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const perception = {
+  polling: false,
+  timers: new Set(),
+  tiles: { camera: false, depth: false, lidar: false, scene: false },
+  resources: {},
+  sceneLayers: { map: true, regions: true, objects: true, robot: true },
+  lastScene: null,
+  lastMap: null,
+  mapAvailable: false,
+  mapImage: null,
+};
+
+function perceptionAtlas() {
+  return collectSettings().atlasEndpoint || "127.0.0.1:50051";
+}
+
+async function perceptionFetch(path) {
+  const atlas = encodeURIComponent(perceptionAtlas());
+  const resp = await fetch(`/api/perception/${path}?atlas=${atlas}`);
+  return resp.json();
+}
+
+function perceptionTile(id) {
+  return document.querySelector(`.perception-tile[data-tile="${id}"]`);
+}
+
+function perceptionMeta(id, text) {
+  const meta = perceptionTile(id)?.querySelector("[data-tile-meta]");
+  if (meta) meta.textContent = text;
+}
+
+function perceptionSetAvailable(id, available) {
+  perception.tiles[id] = !!available;
+  const tile = perceptionTile(id);
+  if (tile) tile.hidden = !available;
+}
+
+function fitCanvas(canvas) {
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.max(1, canvas.clientWidth || 480);
+  const h = Math.max(1, canvas.clientHeight || 480);
+  const pw = Math.round(w * dpr);
+  const ph = Math.round(h * dpr);
+  if (canvas.width !== pw || canvas.height !== ph) {
+    canvas.width = pw;
+    canvas.height = ph;
+  }
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx, w, h };
+}
+
+function applyPerceptionLayout() {
+  const grid = document.getElementById("perceptionGrid");
+  if (!grid) return;
+  const sensors = ["camera", "depth", "lidar"].filter((id) => perception.tiles[id]);
+  for (const id of ["camera", "depth", "lidar", "scene"]) {
+    const tile = perceptionTile(id);
+    if (tile) {
+      tile.style.gridColumn = "";
+      tile.style.gridRow = "";
+    }
+  }
+  // On narrow screens let the CSS media query own the single-column layout;
+  // inline grid templates would otherwise override it.
+  if (window.matchMedia && window.matchMedia("(max-width: 720px)").matches) {
+    grid.style.gridTemplateColumns = "";
+    grid.style.gridTemplateRows = "";
+    return;
+  }
+  if (perception.tiles.scene) {
+    grid.style.gridTemplateColumns = "minmax(0, 3fr) minmax(0, 2fr)";
+    grid.style.gridTemplateRows = `repeat(${Math.max(1, sensors.length)}, minmax(0, 1fr))`;
+    const scene = perceptionTile("scene");
+    if (scene) {
+      scene.style.gridColumn = "1";
+      scene.style.gridRow = "1 / -1";
+    }
+    sensors.forEach((id, i) => {
+      const tile = perceptionTile(id);
+      if (tile) {
+        tile.style.gridColumn = "2";
+        tile.style.gridRow = `${i + 1}`;
+      }
+    });
+  } else {
+    const cols = Math.max(1, sensors.length);
+    grid.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+    grid.style.gridTemplateRows = "minmax(0, 1fr)";
+    sensors.forEach((id, i) => {
+      const tile = perceptionTile(id);
+      if (tile) {
+        tile.style.gridColumn = `${i + 1}`;
+        tile.style.gridRow = "1";
+      }
+    });
+  }
+}
+
+async function perceptionPollImage(id, endpoint) {
+  const img = document.querySelector(`[data-${id}-img]`);
+  if (!img) return;
+  const started = performance.now();
+  try {
+    const data = await perceptionFetch(endpoint);
+    if (!data.ok || !data.image || !data.image.data) {
+      perceptionMeta(id, data.error || "no frame");
+      return;
+    }
+    const src = `data:image/${data.image.encoding || "jpeg"};base64,${data.image.data}`;
+    if (img.getAttribute("src") !== src) img.setAttribute("src", src);
+    const ms = Math.round(performance.now() - started);
+    perceptionMeta(id, `${data.image.width}×${data.image.height} · ${ms}ms`);
+  } catch (_) {
+    perceptionMeta(id, "offline");
+  }
+}
+
+function drawLidar(canvas, scan) {
+  const { ctx, w, h } = fitCanvas(canvas);
+  const cx = w / 2;
+  const cy = h / 2;
+  const maxRange = Math.max(1.0, Number(scan.range_max) || 6.0);
+  const scale = (Math.min(w, h) / 2 - 12) / maxRange;
+
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = "#0b1220";
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.strokeStyle = "rgba(120,140,180,0.15)";
+  ctx.lineWidth = 1;
+  for (let r = 1; r <= Math.floor(maxRange); r += 1) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * scale, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  const ranges = scan.ranges || [];
+  const angleMin = Number(scan.angle_min) || 0;
+  const angleInc = Number(scan.angle_increment) || 0.01;
+  const rangeMin = Number(scan.range_min) || 0;
+  ctx.fillStyle = "#35e0a0";
+  for (let i = 0; i < ranges.length; i += 1) {
+    const r = Number(ranges[i]);
+    if (!Number.isFinite(r) || r < rangeMin || r > maxRange) continue;
+    const a = angleMin + i * angleInc;
+    ctx.fillRect(cx + r * Math.cos(a) * scale, cy + r * Math.sin(a) * scale, 2, 2);
+  }
+
+  ctx.fillStyle = "#ffd166";
+  ctx.beginPath();
+  ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function scenePoint(x, y) {
+  const nx = Number(x);
+  const ny = Number(y);
+  if (!Number.isFinite(nx) || !Number.isFinite(ny)) return null;
+  return { x: nx, y: ny };
+}
+
+function regionPolygons(regions) {
+  // ``points_xy`` is a flat [x0, y0, x1, y1, ...] vertex list.
+  const list = (regions && regions.regions) || [];
+  const out = [];
+  for (const r of list) {
+    const pts = r.points_xy || [];
+    if (!Array.isArray(pts) || pts.length < 6) continue;
+    const poly = [];
+    let ok = true;
+    for (let i = 0; i + 1 < pts.length; i += 2) {
+      const p = scenePoint(pts[i], pts[i + 1]);
+      if (!p) { ok = false; break; }
+      poly.push(p);
+    }
+    if (ok && poly.length >= 3) {
+      out.push({ name: r.name || r.id || "room", kind: r.kind || "room", poly });
+    }
+  }
+  return out;
+}
+
+function regionColor(index) {
+  const palette = [
+    { fill: "rgba(91,141,239,0.10)", stroke: "#5b8def" },
+    { fill: "rgba(53,224,160,0.10)", stroke: "#35e0a0" },
+    { fill: "rgba(197,139,242,0.10)", stroke: "#c58bf2" },
+    { fill: "rgba(90,209,230,0.10)", stroke: "#5ad1e6" },
+    { fill: "rgba(242,114,111,0.10)", stroke: "#f2726f" },
+  ];
+  return palette[index % palette.length];
+}
+
+function mapImageFor(occupancy) {
+  // Decode the occupancy PNG once and reuse it across polls; only re-decode
+  // when the payload changes. Returns null until the image has actually
+  // decoded, so drawScene paints the overlay first and the grid pops in on
+  // the next frame (the onload handler redraws when that happens).
+  const src = occupancy && occupancy.png_b64 ? occupancy.png_b64 : "";
+  if (!src) return null;
+  if (!perception.mapImage || perception.mapImage.src !== src) {
+    const img = new Image();
+    img.onload = () => {
+      if (perception.mapImage && perception.mapImage.src === src) {
+        const canvas = document.querySelector("[data-scene-canvas]");
+        if (canvas && perception.lastScene) drawScene(canvas, perception.lastScene);
+      }
+    };
+    img.src = `data:image/png;base64,${src}`;
+    perception.mapImage = { src, img };
+  }
+  const cached = perception.mapImage;
+  return cached.img.complete && cached.img.naturalWidth ? cached.img : null;
+}
+
+function drawScene(canvas, scene) {
+  const { ctx, w, h } = fitCanvas(canvas);
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = "#0b1220";
+  ctx.fillRect(0, 0, w, h);
+
+  const objects = (scene.objects && scene.objects.objects) || [];
+  const robot = scene.robot || {};
+  const polys = regionPolygons(scene.regions);
+  const layers = perception.sceneLayers || {};
+  const baseMap = layers.map !== false ? perception.lastMap : null;
+
+  // Bounds come from *all* data so toggling a layer never rescales the map.
+  const pts = [];
+  for (const o of objects) {
+    const p = scenePoint(o.x, o.y);
+    if (p) pts.push(p);
+  }
+  const rp = scenePoint(robot.x, robot.y);
+  if (rp) pts.push(rp);
+  for (const poly of polys) pts.push(...poly.poly);
+
+  // The occupancy base map (when present) carries the fixed world extent; its
+  // corners join the bounds so the overlays always land on the same grid. They
+  // are added as points rather than replacing the scene bounds, so a robot
+  // that has driven outside the mapped area is still visible instead of
+  // clipped at the grid edge.
+  if (baseMap) {
+    const mx = Number(baseMap.origin_x);
+    const my = Number(baseMap.origin_y);
+    const mw = Number(baseMap.width) * Number(baseMap.resolution);
+    const mh = Number(baseMap.height) * Number(baseMap.resolution);
+    if ([mx, my, mw, mh].every(Number.isFinite)) {
+      pts.push({ x: mx, y: my }, { x: mx + mw, y: my }, { x: mx, y: my + mh }, { x: mx + mw, y: my + mh });
+    }
+  }
+
+  if (!pts.length) {
+    ctx.fillStyle = "#8892b0";
+    ctx.font = "14px system-ui";
+    ctx.textAlign = "center";
+    ctx.fillText("No scene data yet", w / 2, h / 2);
+    return;
+  }
+
+  const xs = pts.map((p) => p.x);
+  const ys = pts.map((p) => p.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const spanX = Math.max(0.6, maxX - minX);
+  const spanY = Math.max(0.6, maxY - minY);
+  const scale = Math.min((w - 56) / spanX, (h - 56) / spanY);
+  const toX = (x) => w / 2 + (x - (minX + maxX) / 2) * scale;
+  const toY = (y) => h / 2 - (y - (minY + maxY) / 2) * scale;
+
+  // Base map: draw the occupancy PNG under every overlay, aligned to the same
+  // "map" frame via origin/resolution. The image's row 0 is the highest y, so
+  // its canvas top edge is toY(origin_y + height * resolution).
+  if (baseMap) {
+    const img = mapImageFor(baseMap);
+    if (img) {
+      const mx = Number(baseMap.origin_x);
+      const my = Number(baseMap.origin_y);
+      const mw = Number(baseMap.width) * Number(baseMap.resolution);
+      const mh = Number(baseMap.height) * Number(baseMap.resolution);
+      ctx.drawImage(img, toX(mx), toY(my + mh), mw * scale, mh * scale);
+    }
+  }
+
+  ctx.strokeStyle = "rgba(120,140,180,0.12)";
+  ctx.lineWidth = 1;
+  for (let gx = 0; gx <= w; gx += 40) {
+    ctx.beginPath();
+    ctx.moveTo(gx, 0);
+    ctx.lineTo(gx, h);
+    ctx.stroke();
+  }
+  for (let gy = 0; gy <= h; gy += 40) {
+    ctx.beginPath();
+    ctx.moveTo(0, gy);
+    ctx.lineTo(w, gy);
+    ctx.stroke();
+  }
+
+  if (layers.regions !== false) {
+    polys.forEach((r, i) => {
+      const color = regionColor(i);
+      ctx.beginPath();
+      r.poly.forEach((p, j) => {
+        const x = toX(p.x);
+        const y = toY(p.y);
+        if (j === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.closePath();
+      ctx.fillStyle = color.fill;
+      ctx.fill();
+      ctx.strokeStyle = color.stroke;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      const cx = r.poly.reduce((s, p) => s + p.x, 0) / r.poly.length;
+      const cy = r.poly.reduce((s, p) => s + p.y, 0) / r.poly.length;
+      ctx.fillStyle = color.stroke;
+      ctx.font = "11px system-ui";
+      ctx.textAlign = "center";
+      ctx.fillText(r.name, toX(cx), toY(cy));
+    });
+  }
+
+  if (layers.objects !== false) {
+    const palette = ["#5b8def", "#35e0a0", "#ffd166", "#f2726f", "#c58bf2", "#5ad1e6"];
+    objects.forEach((o, i) => {
+      if ((o.label || "") === "robot") return;
+      const p = scenePoint(o.x, o.y);
+      if (!p) return;
+      const x = toX(p.x);
+      const y = toY(p.y);
+      const ow = Math.max(7, (Number(o.size_x) || 0.3) * scale);
+      const oh = Math.max(7, (Number(o.size_y) || 0.3) * scale);
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(-(Number(o.yaw) || 0));
+      ctx.fillStyle = palette[i % palette.length];
+      ctx.globalAlpha = 0.85;
+      ctx.fillRect(-ow / 2, -oh / 2, ow, oh);
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = "rgba(255,255,255,0.35)";
+      ctx.strokeRect(-ow / 2, -oh / 2, ow, oh);
+      ctx.restore();
+      ctx.fillStyle = "#dfe6f5";
+      ctx.font = "11px system-ui";
+      ctx.textAlign = "center";
+      ctx.fillText(o.label || "object", x, y + oh / 2 + 12);
+    });
+  }
+
+  if (layers.robot !== false && rp) {
+    const x = toX(rp.x);
+    const y = toY(rp.y);
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(-(Number(robot.yaw) || 0));
+    ctx.fillStyle = "#ffd166";
+    ctx.beginPath();
+    ctx.moveTo(10, 0);
+    ctx.lineTo(-6, -6);
+    ctx.lineTo(-6, 6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+    ctx.fillStyle = "#ffd166";
+    ctx.font = "11px system-ui";
+    ctx.textAlign = "center";
+    ctx.fillText("robot", x, y + 18);
+  }
+}
+
+async function perceptionPollLidar() {
+  const canvas = document.querySelector("[data-lidar-canvas]");
+  if (!canvas) return;
+  try {
+    const data = await perceptionFetch("lidar");
+    if (!data.ok || !data.scan) {
+      perceptionMeta("lidar", data.error || "no scan");
+      return;
+    }
+    drawLidar(canvas, data.scan);
+    perceptionMeta("lidar", `${(data.scan.ranges || []).length} rays`);
+  } catch (_) {
+    perceptionMeta("lidar", "offline");
+  }
+}
+
+async function perceptionPollScene() {
+  const canvas = document.querySelector("[data-scene-canvas]");
+  if (!canvas) return;
+  let data;
+  try {
+    data = await perceptionFetch("scene");
+  } catch (_) {
+    perceptionMeta("scene", "offline");
+    return;
+  }
+  if (!data.ok || !data.scene) {
+    perceptionMeta("scene", data.error || "no scene");
+    return;
+  }
+  perception.lastScene = data.scene;
+  drawScene(canvas, data.scene);
+  const objects = (data.scene.objects && data.scene.objects.objects) || [];
+  const regions = (data.scene.regions && data.scene.regions.regions) || [];
+  const room = (data.scene.robot && data.scene.robot.room_name) || "";
+  const parts = [`${objects.length} objects`];
+  if (regions.length) parts.push(`${regions.length} regions`);
+  if (room) parts.push(room);
+  perceptionMeta("scene", parts.join(" · "));
+
+  // The base map is fetched after the scene so a slow/unreachable map service
+  // never stalls the overlays; when it does arrive, redraw with the grid in.
+  if (perception.mapAvailable && perception.sceneLayers.map !== false) {
+    try {
+      const mapData = await perceptionFetch("map");
+      perception.lastMap = mapData && mapData.ok && mapData.occupancy ? mapData.occupancy : null;
+    } catch (_) {
+      perception.lastMap = null;
+    }
+    if (perception.lastMap) drawScene(canvas, data.scene);
+  }
+}
+
+function perceptionLoop() {
+  if (!perception.polling) return;
+  if (perception.tiles.camera) perceptionPollImage("camera", "camera");
+  if (perception.tiles.depth) perceptionPollImage("depth", "depth");
+  if (perception.tiles.lidar) perceptionPollLidar();
+  if (perception.tiles.scene) perceptionPollScene();
+}
+
+function renderPerceptionStrip(tiles) {
+  const strip = document.getElementById("perceptionSourceStrip");
+  if (!strip) return;
+  strip.textContent = "";
+  for (const id of ["camera", "depth", "lidar", "scene"]) {
+    const chip = document.createElement("span");
+    chip.className = `perception-source-chip ${tiles[id] ? "online" : "offline"}`;
+    chip.textContent = id;
+    strip.appendChild(chip);
+  }
+}
+
+async function perceptionRefresh() {
+  try {
+    const data = await perceptionFetch("status");
+    const tiles = (data && data.tiles) || {};
+    perception.resources = (data && data.resources) || {};
+    let any = false;
+    for (const [id, available] of Object.entries(tiles)) {
+      perceptionSetAvailable(id, !!available);
+      any = any || !!available;
+    }
+    // The occupancy base map is only offered when the robot-local map service
+    // is actually reachable; otherwise hide its toggle rather than show a
+    // layer that can never draw anything.
+    perception.mapAvailable = !!(perception.resources.scene && perception.resources.scene.map);
+    const mapLayer = document.querySelector('[data-scene-layer="map"]');
+    if (mapLayer) mapLayer.closest(".perception-layer").hidden = !perception.mapAvailable;
+    applyPerceptionLayout();
+    renderPerceptionStrip(tiles);
+    const empty = document.getElementById("perceptionEmpty");
+    if (empty) empty.hidden = any;
+  } catch (_) {
+    renderPerceptionStrip({});
+    const empty = document.getElementById("perceptionEmpty");
+    if (empty) empty.hidden = false;
+  }
+}
+
+function bindSceneLayers() {
+  const root = document.querySelector('.perception-tile[data-tile="scene"]');
+  if (!root || root.dataset.layersBound) return;
+  root.dataset.layersBound = "1";
+  root.querySelectorAll("[data-scene-layer]").forEach((input) => {
+    const key = input.dataset.sceneLayer;
+    input.addEventListener("change", () => {
+      perception.sceneLayers[key] = input.checked;
+      const canvas = document.querySelector("[data-scene-canvas]");
+      if (canvas && perception.lastScene) drawScene(canvas, perception.lastScene);
+    });
+  });
+}
+
+function startPerception() {
+  if (perception.polling) return;
+  perception.polling = true;
+  perceptionRefresh();
+  const timer = setInterval(perceptionLoop, 1000);
+  perception.timers.add(timer);
+}
+
+function stopPerception() {
+  perception.polling = false;
+  for (const timer of perception.timers) clearInterval(timer);
+  perception.timers.clear();
+}
+
+window.addEventListener("robonix:page", (event) => {
+  const name = event.detail && event.detail.name;
+  if (name === "perception") {
+    startPerception();
+  } else {
+    stopPerception();
+  }
+});
 
 init();
