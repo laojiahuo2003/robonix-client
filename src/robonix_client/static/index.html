@@ -187,6 +187,10 @@
                 <header class="perception-tile-header">
                   <h3>Scene map</h3>
                   <div class="perception-tile-actions">
+                    <div class="perception-layers" role="group" aria-label="Map view">
+                      <button class="perception-view-btn" type="button" data-scene-view="fit">fit</button>
+                      <label class="perception-layer"><input type="checkbox" data-scene-view="follow" />follow</label>
+                    </div>
                     <div class="perception-layers" role="group" aria-label="Map layers">
                       <label class="perception-layer"><input type="checkbox" data-scene-layer="map" checked />map</label>
                       <label class="perception-layer"><input type="checkbox" data-scene-layer="regions" checked />regions</label>
