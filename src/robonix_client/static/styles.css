@@ -95,7 +95,7 @@ select {
 
 .nav-rail {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 14px;
   padding: 16px 12px;
   border-right: 1px solid var(--line-soft);
@@ -146,6 +146,54 @@ select {
   background: linear-gradient(135deg, rgba(46, 127, 186, 0.3), rgba(42, 81, 95, 0.32));
   border-color: #22465f;
   color: #d9f3ff;
+}
+
+.lang-switch {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 3px;
+  border: 1px solid #24404e;
+  border-radius: 8px;
+  background: #111c22;
+}
+
+.lang-switch-thumb {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc(50% - 3px);
+  border: 1px solid #22465f;
+  border-radius: 6px;
+  background: linear-gradient(135deg, rgba(46, 127, 186, 0.55), rgba(42, 81, 95, 0.6));
+  transition: transform 0.18s ease;
+}
+
+.lang-switch[data-active="zh"] .lang-switch-thumb {
+  transform: translateX(100%);
+}
+
+.lang-option {
+  position: relative;
+  z-index: 1;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  min-height: 26px;
+  padding: 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.lang-option:hover,
+.lang-option.active {
+  color: #d9f3ff;
+}
+
+.lang-option.active {
+  font-weight: 640;
 }
 
 .panel-header span,

@@ -1,6 +1,15 @@
 const $ = (id) => document.getElementById(id);
 const maybe = (id) => document.getElementById(id);
 
+/// Translate a UI string. Keys are the English source text; i18n.js maps
+/// them for zh-CN. Falls back to the raw key (placeholders interpolated)
+/// if i18n.js has not loaded.
+const t = (key, params) => (window.RobonixI18N
+  ? window.RobonixI18N.t(key, params)
+  : String(key ?? "").replace(/\{([a-zA-Z0-9_]+)\}/g, (whole, name) => (
+    params && params[name] !== undefined && params[name] !== null ? String(params[name]) : whole
+  )));
+
 const state = {
   settings: {},
   sessionId: getSessionId(),
@@ -37,6 +46,9 @@ const state = {
   voiceRecording: false,
   ttsPlaying: false,
   handsfree: { available: false, enabled: false, state: "unavailable", busy: false },
+  // Last /api/system payload, so a language switch can re-render the
+  // connection summary without waiting for the next 7 s poll.
+  lastSystemData: null,
   handsfreeSocket: null,
   handsfreeReconnect: null,
   audio: {
@@ -46,6 +58,7 @@ const state = {
     inputCurrent: null,
     outputCurrent: null,
     vuSocket: null,
+    vuState: "idle",
     logSocket: null,
     logLines: [],
     levelHistory: Array(28).fill(0),
@@ -95,7 +108,7 @@ async function persistSettings() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ settings }),
   }).then((response) => response.json()).catch((error) => ({ ok: false, error: String(error) }));
-  if (!result.ok) throw new Error(result.error || "settings write failed");
+  if (!result.ok) throw new Error(result.error || t("settings write failed"));
   return result;
 }
 
@@ -148,7 +161,7 @@ function loadConversations() {
     if (!Array.isArray(oldHistory)) return [];
     return oldHistory.slice(0, 18).map((item) => ({
       id: getSessionId(),
-      title: item.text || "Untitled chat",
+      title: item.text || t("Untitled chat"),
       updatedAt: item.at || Date.now(),
       messages: item.text ? [{ id: getSessionId(), role: "user", text: item.text, meta: "" }] : [],
       timeline: [],
@@ -354,15 +367,15 @@ async function syncConnectionSettings(fromSettings = false, persist = false) {
   saveSettings();
   window.dispatchEvent(new CustomEvent("robonix:settings"));
   if (!persist) {
-    setText("settingsStatus", "Changed locally. Select Save to persist.");
+    setText("settingsStatus", t("Changed locally. Select Save to persist."));
     return;
   }
-  setText("settingsStatus", "Saving...");
+  setText("settingsStatus", t("Saving..."));
   try {
     const result = await persistSettings();
-    setText("settingsStatus", `Saved to ${result.path}.`);
+    setText("settingsStatus", t("Saved to {path}.", { path: result.path }));
   } catch (error) {
-    setText("settingsStatus", `Save failed: ${error}`);
+    setText("settingsStatus", t("Save failed: {error}", { error }));
   }
 }
 
@@ -413,7 +426,7 @@ function bindEvents() {
     event.preventDefault();
     if (state.voiceRecording) {
       if (state.voiceFinishSupported) finishVoiceCapture();
-      else addStatusLine("This robot cannot stop a recording on request; it ends on silence or at the record-seconds limit.");
+      else addStatusLine(t("This robot cannot stop a recording on request; it ends on silence or at the record-seconds limit."));
       return;
     }
     if (state.voiceActive) return;
@@ -454,8 +467,8 @@ function bindEvents() {
   $("clearHistory").addEventListener("click", clearHistory);
   maybe("connectNow")?.addEventListener("click", async () => {
     state.settings = collectSettings();
-    await persistSettings().catch((error) => addTimeline("error", `settings save failed: ${error}`));
-    addTimeline("system", `connecting to ${state.settings.robotHost}:${state.settings.atlasPort}`);
+    await persistSettings().catch((error) => addTimeline("error", t("settings save failed: {error}", { error })));
+    addTimeline("system", t("connecting to {endpoint}", { endpoint: `${state.settings.robotHost}:${state.settings.atlasPort}` }));
     refreshSystem();
   });
   maybe("startAudioServer")?.addEventListener("click", startAudioServer);
@@ -529,7 +542,9 @@ async function configureReverseAudio(providerId) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ settings: collectSettings(), providerId }),
   }).then((r) => r.json()).catch((error) => ({ ok: false, error: String(error) }));
-  appendAudioLog(result.ok ? `reverse audio target ${result.target}` : `reverse audio error: ${result.error || "unknown"}`);
+  appendAudioLog(result.ok
+    ? t("reverse audio target {target}", { target: result.target })
+    : t("reverse audio error: {error}", { error: result.error || "unknown" }));
 }
 
 async function refreshHandsfree() {
@@ -547,7 +562,7 @@ async function refreshHandsfree() {
 
 async function toggleHandsfree() {
   if (state.voiceActive) {
-    addStatusLine("Stop the active F2 voice session before changing hands-free mode.");
+    addStatusLine(t("Stop the active F2 voice session before changing hands-free mode."));
     return;
   }
   if (state.handsfree.busy) return;
@@ -562,7 +577,9 @@ async function toggleHandsfree() {
   state.handsfree = { ...state.handsfree, ...result, busy: false };
   renderHandsfree();
   syncHandsfreeEventStream();
-  addTimeline(result.ok ? "voice" : "error", result.ok ? `robot hands-free ${enabled ? "enabled" : "disabled"}` : `hands-free: ${result.error || result.detail || "unavailable"}`);
+  addTimeline(result.ok ? "voice" : "error", result.ok
+    ? t(enabled ? "robot hands-free enabled" : "robot hands-free disabled")
+    : t("hands-free: {error}", { error: result.error || result.detail || t("unavailable") }));
 }
 
 function renderHandsfree() {
@@ -576,21 +593,21 @@ function renderHandsfree() {
   button.classList.toggle("busy", state.handsfree.busy || ["triggered", "acknowledging", "in_voice"].includes(status));
   button.classList.toggle("error", status === "error" || status === "unavailable");
   label.textContent = state.handsfree.busy
-    ? "Hands-free..."
+    ? t("Hands-free...")
     : status === "listening"
-      ? "Listening"
+      ? t("Listening")
       : status === "acknowledging"
-        ? "Acknowledging"
+        ? t("Acknowledging")
       : status === "in_voice"
-        ? "Hands-free active"
+        ? t("Hands-free active")
         : status === "suspended"
-          ? "Recording"
+          ? t("Recording")
         : state.handsfree.enabled
-          ? `Hands-free ${status}`
-          : "Hands-free off";
+          ? t("Hands-free {status}", { status: t(status) })
+          : t("Hands-free off");
   button.title = state.handsfree.lastError || state.handsfree.error || (state.handsfree.keyword
-    ? `Last wake phrase: ${state.handsfree.keyword}`
-    : "Robot-local wake phrase configured by Speech");
+    ? t("Last wake phrase: {phrase}", { phrase: state.handsfree.keyword })
+    : t("Robot-local wake phrase configured by Speech"));
   syncVoiceControls();
 }
 
@@ -609,12 +626,12 @@ function syncVoiceControls() {
   // rather than only disabling it.
   const hideStart = state.voiceRecording && state.voiceFinishSupported;
   const title = state.ttsPlaying
-      ? "Interrupt speech and start a new voice turn (F2)"
+      ? t("Interrupt speech and start a new voice turn (F2)")
       : state.voiceActive
-        ? "Voice recording is already active"
+        ? t("Voice recording is already active")
         : state.busy
-          ? "Record a spoken instruction for the running task (F2)"
-          : "Start voice recording (F2)";
+          ? t("Record a spoken instruction for the running task (F2)")
+          : t("Start voice recording (F2)");
   maybe("voiceButton")?.toggleAttribute("disabled", disabled);
   if (maybe("voiceButton")) $("voiceButton").title = title;
   document.querySelectorAll("[data-page-action='voice-start']").forEach((button) => {
@@ -627,10 +644,10 @@ function syncVoiceControls() {
     const micBlocked = handsfreeOwnsMicrophone() || state.voiceActive;
     micTest.toggleAttribute("disabled", micBlocked);
     micTest.title = state.voiceActive
-      ? "An F2 voice session owns this microphone. Stop it before testing the route."
+      ? t("An F2 voice session owns this microphone. Stop it before testing the route.")
       : handsfreeOwnsMicrophone()
-        ? "Hands-free owns this microphone. Turn it off before running an exclusive microphone test."
-        : "Capture one second through the selected Robonix microphone route.";
+        ? t("Hands-free owns this microphone. Turn it off before running an exclusive microphone test.")
+        : t("Capture one second through the selected Robonix microphone route.");
   }
   const handsfree = maybe("handsfreeToggle");
   if (handsfree) handsfree.toggleAttribute("disabled", state.voiceActive || state.handsfree.busy);
@@ -640,11 +657,11 @@ function syncVoiceControls() {
     finishButton.hidden = !show;
     if (show && !state.finishInFlight) {
       finishButton.disabled = false;
-      setButtonLabel(finishButton, "Stop recording");
+      setButtonLabel(finishButton, t("Stop recording"));
     }
     finishButton.title = state.voiceFinishSupported
-      ? "Stop recording and send what you have said so far (F2). Does not cancel the task."
-      : "This robot does not advertise robonix/system/liaison/voice/finish, so recordings can only end on their own.";
+      ? t("Stop recording and send what you have said so far (F2). Does not cancel the task.")
+      : t("This robot does not advertise robonix/system/liaison/voice/finish, so recordings can only end on their own.");
   }
 }
 
@@ -673,13 +690,13 @@ function syncHandsfreeEventStream() {
   state.handsfreeSocket = socket;
   socket.onopen = () => {
     socket.send(JSON.stringify({ settings: collectSettings() }));
-    addStatusLine("Watching robot hands-free interaction.");
+    addStatusLine(t("Watching robot hands-free interaction."));
   };
   socket.onmessage = (message) => {
     const payload = JSON.parse(message.data);
     if (payload.type === "voice_event") handleVoiceEvent(payload.event);
-    if (payload.type === "accepted") addTimeline("voice", "hands-free event stream connected");
-    if (payload.type === "error") addMessage("error", payload.error || "hands-free event stream failed");
+    if (payload.type === "accepted") addTimeline("voice", t("hands-free event stream connected"));
+    if (payload.type === "error") addMessage("error", payload.error || t("hands-free event stream failed"));
   };
   socket.onclose = () => {
     if (state.handsfreeSocket === socket) state.handsfreeSocket = null;
@@ -732,7 +749,7 @@ function renderAttachments() {
     const pill = document.createElement("button");
     pill.type = "button";
     pill.className = "attachment-pill";
-    pill.title = "Remove attachment";
+    pill.title = t("Remove attachment");
     pill.textContent = item.name;
     pill.addEventListener("click", () => {
       state.attachments.splice(index, 1);
@@ -768,7 +785,7 @@ function forgetActiveTurn() {
 function newSession() {
   if (state.busy) {
     pendingNewSessionTitle = null;
-    addStatusLine("Abort the running task before starting a new session.");
+    addStatusLine(t("Abort the running task before starting a new session."));
     return;
   }
   // Captured at mousedown, before the field blurred. An untouched field still
@@ -790,7 +807,7 @@ function newSession() {
   state.batches = [];
   state.nodeStates = {};
   state.activeAgentId = null;
-  state.sessionTitle = uniqueConversationTitle(requestedTitle || "Untitled chat", state.sessionId);
+  state.sessionTitle = uniqueConversationTitle(requestedTitle || t("Untitled chat"), state.sessionId);
   $("promptTitle").textContent = state.sessionTitle;
   renderSessionChip();
   // force: an empty transcript would otherwise fail the has-content check and
@@ -799,8 +816,8 @@ function newSession() {
   // Pilot keys conversation history by session id, so a fresh id is what
   // actually drops the old turns from the next prompt. Say so -- against an
   // already-empty transcript the reset is otherwise invisible.
-  addStatusLine("New session started; the planner's history for this conversation is cleared.");
-  addTimeline("status", `new session ${state.sessionId.slice(0, 8)}`);
+  addStatusLine(t("New session started; the planner's history for this conversation is cleared."));
+  addTimeline("status", t("new session {id}", { id: state.sessionId.slice(0, 8) }));
   renderMessages();
   renderTimeline();
   renderPlan();
@@ -852,9 +869,9 @@ async function sendTask() {
   const wasBusy = hasActiveTurn();
   state.activeVoiceMode = "voice";
   const display = text || attachments.map((item) => item.name).join(", ");
-  addMessage("user", display, wasBusy ? "added to running task" : (attachments.length ? `${attachments.length} image` : ""), attachments);
-  addStatusLine(wasBusy ? "Sent to the running task; waiting for Pilot to react." : "Submitted task; waiting for Pilot stream.");
-  addTimeline("task", wasBusy ? `added: ${display}` : `task: ${display}`);
+  addMessage("user", display, wasBusy ? t("added to running task") : (attachments.length ? t("{count} image", { count: attachments.length }) : ""), attachments);
+  addStatusLine(wasBusy ? t("Sent to the running task; waiting for Pilot to react.") : t("Submitted task; waiting for Pilot stream."));
+  addTimeline("task", wasBusy ? t("added: {text}", { text: display }) : t("task: {text}", { text: display }));
   persistCurrentConversation(display);
   $("taskInput").value = "";
   autoGrowInput();
@@ -882,9 +899,11 @@ function stopCurrentTask() {
   state.stopInFlight = true;
   const button = $("stopButton");
   button.disabled = true;
-  setButtonLabel(button, "Aborting");
-  addStatusLine("Abort requested; canceling every running task and any robot motion.");
-  addTimeline("cancel", `abort requested${state.activeTurnId ? ` for ${state.activeTurnId}` : ""}`);
+  setButtonLabel(button, t("Aborting"));
+  addStatusLine(t("Abort requested; canceling every running task and any robot motion."));
+  addTimeline("cancel", state.activeTurnId
+    ? t("abort requested for {turn}", { turn: state.activeTurnId })
+    : t("abort requested"));
 
   stopActiveVoiceSession();
 
@@ -904,7 +923,7 @@ function stopCurrentTask() {
 function resetStopState() {
   state.stopInFlight = false;
   $("stopButton").disabled = false;
-  setButtonLabel($("stopButton"), "Abort all tasks");
+  setButtonLabel($("stopButton"), t("Abort all tasks"));
 }
 
 function completeStopState() {
@@ -944,9 +963,9 @@ function finishVoiceCapture() {
   const button = maybe("finishVoiceButton");
   if (button) {
     button.disabled = true;
-    setButtonLabel(button, "Stopping");
+    setButtonLabel(button, t("Stopping"));
   }
-  addStatusLine("Stopping recording; submitting what has been recognized so far.");
+  addStatusLine(t("Stopping recording; submitting what has been recognized so far."));
   const send = () => {
     if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "finish" }));
   };
@@ -956,17 +975,17 @@ function finishVoiceCapture() {
 
 function startVoice() {
   if (state.voiceActive) {
-    addStatusLine("Voice recording is already active.");
+    addStatusLine(t("Voice recording is already active."));
     return;
   }
   const wasBusy = hasActiveTurn();
   state.voiceActive = true;
   maybe("voiceButton")?.classList.add("active");
   document.querySelectorAll("[data-page-action='voice-start']").forEach((button) => button.classList.add("active"));
-  if (maybe("voiceState")) $("voiceState").textContent = "recording";
+  if (maybe("voiceState")) $("voiceState").textContent = t("recording");
   syncVoiceControls();
-  addStatusLine("Listening for voice input.");
-  addTimeline("voice", wasBusy ? "voice input for running task" : "voice session requested");
+  addStatusLine(t("Listening for voice input."));
+  addTimeline("voice", wasBusy ? t("voice input for running task") : t("voice session requested"));
   const socket = new WebSocket(wsUrl("/ws/voice"));
   beginStream(socket);
   socket.robonixVoiceMode = "voice";
@@ -999,10 +1018,10 @@ function wireStream(socket, done, voiceSocket = null) {
     const payload = JSON.parse(event.data);
     if (payload.type === "pilot_event") handlePilotEvent(payload.event);
     if (payload.type === "voice_event") handleVoiceEvent(payload.event, voiceSocket);
-    if (payload.type === "accepted") addStatusLine("Connected; waiting for Robonix events.");
-    if (payload.type === "status") addTimeline("status", payload.message || "status");
+    if (payload.type === "accepted") addStatusLine(t("Connected; waiting for Robonix events."));
+    if (payload.type === "status") addTimeline("status", payload.message || t("status"));
     if (payload.type === "finish_requested") {
-      addTimeline(payload.ok ? "voice" : "error", payload.detail || (payload.ok ? "recording stop requested" : "could not stop recording"));
+      addTimeline(payload.ok ? "voice" : "error", payload.detail || (payload.ok ? t("recording stop requested") : t("could not stop recording")));
       // A rejected request leaves the turn recording, so hand the control back
       // rather than stranding the user with a dead "Stopping" button.
       if (!payload.ok) {
@@ -1016,7 +1035,7 @@ function wireStream(socket, done, voiceSocket = null) {
       socket.close();
     }
   };
-  socket.onerror = () => addMessage("error", "stream failed");
+  socket.onerror = () => addMessage("error", t("stream failed"));
   socket.onclose = done;
 }
 
@@ -1029,7 +1048,7 @@ function handlePilotEvent(event) {
     state.plan = event.plan;
     upsertPlanRecord(event.plan);
     announcePlan(event.plan);
-    addTimeline("plan", `live round ${event.plan.round}: ${planCalls(event.plan).length} call(s)`);
+    addTimeline("plan", t("live round {round}: {count} call(s)", { round: event.plan.round, count: planCalls(event.plan).length }));
     renderPlan();
     persistCurrentConversation();
     refreshActivePlans();
@@ -1044,7 +1063,7 @@ function handlePilotEvent(event) {
         if (Number.isFinite(Number(result.nodeIndex))) record.nodeStates[String(result.nodeIndex)] = result;
       });
     });
-    addTimeline(event.batchResult.anyFailed ? "error" : "result", `round ${event.batchResult.round} result`);
+    addTimeline(event.batchResult.anyFailed ? "error" : "result", t("round {round} result", { round: event.batchResult.round }));
     renderPlan();
     persistCurrentConversation();
   } else if (event.kind === "node_state" && event.nodeState) {
@@ -1052,7 +1071,7 @@ function handlePilotEvent(event) {
     updatePlanRecordResult(event.nodeState.planId, (record) => {
       record.nodeStates[String(event.nodeState.nodeIndex)] = event.nodeState;
     });
-    addTimeline(event.nodeState.state === "FAILED" ? "error" : "status", `${event.nodeState.opId || `node ${event.nodeState.nodeIndex}`} ${event.nodeState.state}`);
+    addTimeline(event.nodeState.state === "FAILED" ? "error" : "status", `${event.nodeState.opId || t("node {index}", { index: event.nodeState.nodeIndex })} ${t(event.nodeState.state)}`);
     renderPlan();
     persistCurrentConversation();
   } else if (event.kind === "task_state" && event.taskState) {
@@ -1065,8 +1084,8 @@ function handlePilotEvent(event) {
       state.taskRunning = false;
     }
     setBusy(state.activeStreams > 0 || state.taskRunning);
-    addTimeline("status", event.taskState.status || event.taskState.goal || "task update");
-    addStatusLine(event.taskState.status || event.taskState.goal || "Task state updated.");
+    addTimeline("status", t(event.taskState.status || event.taskState.goal || "task update"));
+    addStatusLine(t(event.taskState.status || event.taskState.goal || "Task state updated."));
     renderPlan();
     persistCurrentConversation();
   } else if (event.kind === "status" && event.status) {
@@ -1082,7 +1101,7 @@ function handlePilotEvent(event) {
       state.taskRunning = false;
       setBusy(state.activeStreams > 0);
     }
-    addTimeline("status", event.status.message || `state ${event.status.state}`);
+    addTimeline("status", event.status.message || t("state {state}", { state: event.status.state }));
     if (event.status.message) addStatusLine(event.status.message);
   }
 }
@@ -1139,15 +1158,15 @@ function handleVoiceEvent(event, sourceSocket = null) {
     handlePilotEvent(event.pilot);
   } else if (event.kind === "tts_started") {
     setTtsAura(true);
-    addMessage("status", label || "TTS playback started");
-    addTimeline("voice", label || "TTS playback started");
+    addMessage("status", label || t("TTS playback started"));
+    addTimeline("voice", label || t("TTS playback started"));
   } else if (event.kind === "tts_done") {
     setTtsAura(false);
     const skipped = String(label || "").toLowerCase().includes("skipped");
-    addMessage(skipped ? "error" : "status", label || "TTS playback done");
-    addTimeline(skipped ? "error" : "voice", label || "TTS playback done");
+    addMessage(skipped ? "error" : "status", label || t("TTS playback done"));
+    addTimeline(skipped ? "error" : "voice", label || t("TTS playback done"));
   } else if (event.kind === "error") {
-    addMessage("error", event.error || "voice error");
+    addMessage("error", event.error || t("voice error"));
   } else {
     addTimeline("voice", label);
   }
@@ -1166,7 +1185,7 @@ function setVoiceRecording(active) {
 function finishVoiceCaptureUi() {
   maybe("voiceButton")?.classList.remove("active");
   document.querySelectorAll("[data-page-action='voice-start']").forEach((button) => button.classList.remove("active"));
-  if (maybe("voiceState")) $("voiceState").textContent = "ready";
+  if (maybe("voiceState")) $("voiceState").textContent = t("ready");
 }
 
 function hasActiveTurn() {
@@ -1258,7 +1277,7 @@ function renderMessages() {
   if (state.messages.length === 0) {
     const empty = document.createElement("div");
     empty.className = "message status";
-    empty.textContent = "Ready";
+    empty.textContent = t("Ready");
     root.appendChild(empty);
   }
   state.messages.forEach((message) => {
@@ -1275,7 +1294,7 @@ function renderMessages() {
       const action = document.createElement("button");
       action.type = "button";
       action.className = "message-link";
-      action.textContent = "Show RTDL";
+      action.textContent = t("Show RTDL");
       action.addEventListener("click", () => {
         openRtdlHistory();
       });
@@ -1287,7 +1306,7 @@ function renderMessages() {
       message.attachments.forEach((item) => {
         const img = document.createElement("img");
         img.src = item.dataUrl;
-        img.alt = item.name || "attachment";
+        img.alt = item.name || t("attachment");
         images.appendChild(img);
       });
       el.appendChild(images);
@@ -1306,21 +1325,21 @@ function addTimeline(kind, text) {
 
 function renderTimeline() {
   setTextAll("[data-event-summary]", String(state.timeline.length));
-  setTextAll("[data-current-task-label]", `Current Task: ${currentTaskLabel()}`);
+  setTextAll("[data-current-task-label]", t("Current Task: {task}", { task: currentTaskLabel() }));
   const rows = state.timeline;
   document.querySelectorAll("[data-event-list]").forEach((root) => {
     clear(root);
     if (!rows.length) {
       const empty = document.createElement("div");
       empty.className = "event-empty";
-      empty.textContent = "No task events yet.";
+      empty.textContent = t("No task events yet.");
       root.appendChild(empty);
       return;
     }
     rows.forEach((item) => {
       const row = document.createElement("div");
       row.className = "event-row";
-      row.textContent = `[${item.at}] ${String(item.kind || "event").toUpperCase()} ${item.text || ""}`;
+      row.textContent = `[${item.at}] ${String(item.kind || t("event")).toUpperCase()} ${item.text || ""}`;
       root.appendChild(row);
     });
   });
@@ -1335,8 +1354,13 @@ function renderPlan() {
   const historyRecords = records.filter((record) => !activeRecords.includes(record));
   const latestCalls = planCalls(latestRecord?.plan).length;
   setTextAll("[data-plan-summary]", latestRecord
-    ? `${activeRecords.length} active · plan ${latestRecord.plan.planId || "-"} · round ${latestRecord.plan.round} · ${latestCalls} call(s)`
-    : "No RTDL tree is currently executing");
+    ? t("{active} active · plan {plan} · round {round} · {calls} call(s)", {
+      active: activeRecords.length,
+      plan: latestRecord.plan.planId || "-",
+      round: latestRecord.plan.round,
+      calls: latestCalls,
+    })
+    : t("No RTDL tree is currently executing"));
   if (maybe("rtdlHistoryCount")) $("rtdlHistoryCount").textContent = String(historyRecords.length);
   renderGoalPanel();
   renderSceneAssets();
@@ -1344,7 +1368,7 @@ function renderPlan() {
     roots.forEach((root) => {
       const empty = document.createElement("div");
       empty.className = "plan-empty";
-      empty.textContent = "No RTDL plan in this session yet.";
+      empty.textContent = t("No RTDL plan in this session yet.");
       root.appendChild(empty);
     });
   } else {
@@ -1371,7 +1395,7 @@ function renderPlanRecord(root, record, onSelect = renderExecutionDetail) {
   wrapper.className = "plan-record";
   const label = document.createElement("div");
   label.className = "plan-record-label";
-  label.textContent = `Plan ${record.plan.planId || "-"} · round ${record.plan.round}`;
+  label.textContent = t("Plan {id} · round {round}", { id: record.plan.planId || "-", round: record.plan.round });
   wrapper.appendChild(label);
   const maps = buildResultMaps(record);
   const runningIndex = recordIsActive(record)
@@ -1389,7 +1413,7 @@ function renderPlanHistory(records) {
   if (!records.length) {
     const empty = document.createElement("div");
     empty.className = "plan-empty";
-    empty.textContent = "No completed RTDL trees yet.";
+    empty.textContent = t("No completed RTDL trees yet.");
     root.appendChild(empty);
   }
 }
@@ -1416,7 +1440,9 @@ function renderBehaviorTree(root, plan, resultMaps, runningIndex, onSelect = ren
     const header = document.createElement("div");
     header.className = "bt-tree-header";
     const title = document.createElement("strong");
-    title.textContent = treeRoots.length > 1 ? `Tree ${treeIndex + 1}: ${nodeLabel(treeRoot)}` : nodeLabel(treeRoot);
+    title.textContent = treeRoots.length > 1
+      ? t("Tree {n}: {label}", { n: treeIndex + 1, label: nodeLabel(treeRoot) })
+      : nodeLabel(treeRoot);
     const pill = document.createElement("span");
     pill.className = `status ${statusKey(status)}`;
     pill.textContent = displayStatus(status);
@@ -1685,8 +1711,8 @@ function durationForNode(node, status) {
   if (Number.isFinite(Number(value))) return `${(Number(value) / 1000).toFixed(2)}s`;
   const key = statusKey(status);
   if (key === "pending") return "-";
-  if (key === "running") return "running";
-  return "done";
+  if (key === "running") return t("running");
+  return t("done");
 }
 
 function startedForNode(node, status) {
@@ -1725,7 +1751,7 @@ async function refreshActivePlans() {
     state.executorPlansReady = false;
     state.executorPlans = [];
     state.executorPlanIds = new Set();
-    renderActivePlans("Set Robot Host first.");
+    renderActivePlans(t("Set Robot Host first."));
     return;
   }
   const settings = { ...collectSettings(), atlasEndpoint: atlas };
@@ -1740,7 +1766,7 @@ async function refreshActivePlans() {
     error: String(error),
   }));
   if (!result.available) {
-    renderActivePlans(result.error || "Executor query unavailable.");
+    renderActivePlans(result.error || t("Executor query unavailable."));
     return;
   }
   state.executorPlansReady = true;
@@ -1759,6 +1785,7 @@ async function refreshActivePlans() {
 }
 
 function renderActivePlans(error = "") {
+  state.activePlansError = error;
   const root = maybe("activeRtdlList");
   const count = maybe("activeRtdlCount");
   const summary = maybe("activeRtdlSummary");
@@ -1766,9 +1793,9 @@ function renderActivePlans(error = "") {
   if (!root || !count) return;
   clear(root);
   if (error) {
-    count.textContent = "unavailable";
-    if (summary) summary.textContent = "Executor state unavailable";
-    if (modalSummary) modalSummary.textContent = "Live Executor query failed";
+    count.textContent = t("unavailable");
+    if (summary) summary.textContent = t("Executor state unavailable");
+    if (modalSummary) modalSummary.textContent = t("Live Executor query failed");
     const row = document.createElement("div");
     row.className = "active-rtdl-empty error";
     row.textContent = error;
@@ -1777,12 +1804,15 @@ function renderActivePlans(error = "") {
   }
   const planCount = state.executorPlans.length;
   count.textContent = String(planCount);
-  if (summary) summary.textContent = planCount ? `${planCount} running · open live workspace` : "No plans running";
-  if (modalSummary) modalSummary.textContent = `${planCount} live plan${planCount === 1 ? "" : "s"} reported by Executor`;
+  if (summary) summary.textContent = planCount ? t("{count} running · open live workspace", { count: planCount }) : t("No plans running");
+  if (modalSummary) modalSummary.textContent = t(
+    planCount === 1 ? "{count} live plan reported by Executor" : "{count} live plans reported by Executor",
+    { count: planCount },
+  );
   if (!state.executorPlans.length) {
     const row = document.createElement("div");
     row.className = "active-rtdl-empty";
-    row.textContent = "Executor reports no active RTDL plans.";
+    row.textContent = t("Executor reports no active RTDL plans.");
     root.appendChild(row);
     return;
   }
@@ -1793,14 +1823,14 @@ function renderActivePlans(error = "") {
     header.className = "active-rtdl-card-header";
     const body = document.createElement("div");
     const title = document.createElement("strong");
-    title.textContent = plan.description || `Plan ${plan.planId}`;
+    title.textContent = plan.description || t("Plan {id}", { id: plan.planId });
     const meta = document.createElement("span");
     const runningOps = (plan.ops || []).filter((op) => op.state === "running").length;
-    meta.textContent = `plan ${plan.planId} · ${runningOps}/${plan.opCount} running`;
+    meta.textContent = t("plan {id} · {running}/{total} running", { id: plan.planId, running: runningOps, total: plan.opCount });
     body.append(title, meta);
     const statePill = document.createElement("span");
     statePill.className = `status ${plan.cancelled ? "ended" : "running"}`;
-    statePill.textContent = plan.cancelled ? "CANCELING" : "RUNNING";
+    statePill.textContent = plan.cancelled ? t("CANCELING") : t("RUNNING");
     header.append(body, statePill);
     card.appendChild(header);
 
@@ -1810,7 +1840,7 @@ function renderActivePlans(error = "") {
     if (!planOps.length) {
       const empty = document.createElement("span");
       empty.className = "active-rtdl-empty";
-      empty.textContent = "No operation details reported.";
+      empty.textContent = t("No operation details reported.");
       ops.appendChild(empty);
     } else {
       planOps.forEach((op) => {
@@ -1819,19 +1849,19 @@ function renderActivePlans(error = "") {
         const opMain = document.createElement("div");
         opMain.className = "active-rtdl-op-main";
         const opTitle = document.createElement("strong");
-        opTitle.textContent = op.description || `Operation ${op.op_id || "-"}`;
+        opTitle.textContent = op.description || t("Operation {id}", { id: op.op_id || "-" });
         const opMeta = document.createElement("span");
-        opMeta.textContent = `op ${op.op_id || "-"} · ${op.kind || "do"}`;
+        opMeta.textContent = t("op {id} · {kind}", { id: op.op_id || "-", kind: op.kind || "do" });
         opMain.append(opTitle, opMeta);
         const target = document.createElement("div");
         target.className = "active-rtdl-op-target";
         target.textContent = op.provider_id || op.contract_id
-          ? `${op.provider_id || "?"} · ${op.contract_id || "operator"}`
-          : "operator node";
+          ? `${op.provider_id || "?"} · ${op.contract_id || t("operator")}`
+          : t("operator node");
         const opState = document.createElement("span");
         const stateName = String(op.state || "pending").toLowerCase();
         opState.className = `status ${stateName}`;
-        opState.textContent = stateName.toUpperCase();
+        opState.textContent = t(stateName.toUpperCase());
         opRow.append(opMain, target, opState);
         ops.appendChild(opRow);
       });
@@ -1842,17 +1872,17 @@ function renderActivePlans(error = "") {
 }
 
 function displayStatus(status) {
-  return statusKey(status).toUpperCase();
+  return t(statusKey(status).toUpperCase());
 }
 
 function renderExecutionDetail(node, status, nodeState = null) {
   if (!maybe("activeProvider")) return;
-  if (maybe("executionDetailTitle")) $("executionDetailTitle").textContent = node ? "Node detail" : "Node detail";
+  if (maybe("executionDetailTitle")) $("executionDetailTitle").textContent = node ? t("Node detail") : t("Node detail");
   if (!node) {
     $("activeProvider").textContent = "-";
     $("activeStarted").textContent = "-";
     $("activeDuration").textContent = "-";
-    $("activeArgs").textContent = "Select an RTDL node to inspect its arguments and result.";
+    $("activeArgs").textContent = t("Select an RTDL node to inspect its arguments and result.");
     return;
   }
   $("activeProvider").textContent = detailProvider(node);
@@ -1864,13 +1894,13 @@ function renderExecutionDetail(node, status, nodeState = null) {
 function renderHistoryExecutionDetail(node, status, nodeState = null) {
   if (!maybe("historyActiveProvider")) return;
   if (maybe("historyExecutionDetailTitle")) {
-    $("historyExecutionDetailTitle").textContent = node ? nodeLabel(node) : "Node detail";
+    $("historyExecutionDetailTitle").textContent = node ? nodeLabel(node) : t("Node detail");
   }
   if (!node) {
     $("historyActiveProvider").textContent = "-";
     $("historyActiveStarted").textContent = "-";
     $("historyActiveDuration").textContent = "-";
-    $("historyActiveArgs").textContent = "Select an RTDL node to inspect its arguments and result.";
+    $("historyActiveArgs").textContent = t("Select an RTDL node to inspect its arguments and result.");
     return;
   }
   $("historyActiveProvider").textContent = detailProvider(node);
@@ -1998,45 +2028,47 @@ function renderGoalPanel() {
   const task = state.taskState || {};
   const context = currentExecutionContext();
   const active = context?.node || null;
-  const taskText = task.goal || task.task || firstUserMessage() || "waiting for task";
+  const taskText = task.goal || task.task || firstUserMessage() || t("waiting for task");
   const status = task.status || (context ? "executing" : "idle");
-  if (maybe("goalLine")) $("goalLine").textContent = `${status}: ${taskText}`;
+  if (maybe("goalLine")) $("goalLine").textContent = t("{status}: {task}", { status: t(status), task: taskText });
   document.querySelectorAll("[data-goal-preview]").forEach((goal) => {
     clear(goal);
     const card = document.createElement("div");
     card.className = "goal-card";
     const source = document.createElement("span");
     source.className = `goal-source${context?.source === "Executor verified" ? " verified" : ""}`;
-    source.textContent = context?.source || (state.executorPlansReady ? "Executor verified" : "Executor unavailable");
+    source.textContent = context?.source
+      ? t(context.source)
+      : (state.executorPlansReady ? t("Executor verified") : t("Executor unavailable"));
     const title = document.createElement("strong");
     title.textContent = active?.call?.name
       || context?.op?.description
       || context?.plan?.description
-      || "No active Executor call";
+      || t("No active Executor call");
     card.append(source, title);
     if (context) {
       const fields = document.createElement("div");
       fields.className = "goal-call-grid";
       const providerId = active?.call?.providerId || context.op?.provider_id || context.op?.providerId || "-";
       const contractId = active?.call?.contractId || context.op?.contract_id || context.op?.contractId || "-";
-      appendGoalField(fields, "Provider", providerId);
-      appendGoalField(fields, "Contract", contractId);
+      appendGoalField(fields, t("Provider"), providerId);
+      appendGoalField(fields, t("Contract"), contractId);
       appendGoalField(
         fields,
-        "Operation",
+        t("Operation"),
         active?.call?.name || (contractId !== "-" ? contractId.split("/").pop() : "") || context.op?.description || nodeLabel(active || {}),
       );
       appendGoalField(
         fields,
-        "Plan / node",
+        t("Plan / node"),
         `${context.plan?.planId || "-"} / ${context.op?.op_id || context.op?.opId || active?.opId || active?.index || "-"}`,
       );
       card.appendChild(fields);
     } else {
       const empty = document.createElement("span");
       empty.textContent = state.executorPlansReady
-        ? "Executor reports no running RTDL plan."
-        : "Connect to Executor to read the authoritative running call.";
+        ? t("Executor reports no running RTDL plan.")
+        : t("Connect to Executor to read the authoritative running call.");
       card.appendChild(empty);
     }
     const target = goalSummary(active);
@@ -2063,7 +2095,7 @@ function goalSummary(node) {
 
 function currentTaskLabel() {
   const text = firstUserMessage();
-  if (!text) return "idle";
+  if (!text) return t("idle");
   return text.length > 40 ? `${text.slice(0, 37)}...` : text;
 }
 
@@ -2083,7 +2115,7 @@ async function refreshVoiceFinishSupport() {
 async function refreshSystem() {
   const atlas = buildAtlasEndpoint($("robotHost").value, $("atlasPort").value);
   if (!atlas) {
-    renderSystem({ error: "Set Robot Host and Atlas Port first.", summary: { state: "offline" }, requiredContracts: [], providers: [] });
+    renderSystem({ error: t("Set Robot Host and Atlas Port first."), summary: { state: "offline" }, requiredContracts: [], providers: [] });
     return;
   }
   const data = await fetch(`/api/system?atlas=${encodeURIComponent(atlas)}`).then((r) => r.json()).catch((error) => ({ error: String(error) }));
@@ -2091,18 +2123,19 @@ async function refreshSystem() {
 }
 
 function renderSystem(data) {
+  state.lastSystemData = data;
   const summary = data.summary || {};
   const stateLabel = data.error ? "offline" : summary.state || "unknown";
   const online = !data.error;
-  $("connectionState").textContent = stateLabel;
+  $("connectionState").textContent = t(stateLabel);
   $("refreshSystem").classList.toggle("offline", !online);
   $("refreshSystem").classList.toggle("online", online);
   if (maybe("connectNow")) {
-    $("connectNow").textContent = online ? "Connected" : "Connect";
+    $("connectNow").textContent = online ? t("Connected") : t("Connect");
     $("connectNow").classList.toggle("connected", online);
-    $("connectNow").title = online ? "Atlas is reachable" : "Check Atlas connection";
+    $("connectNow").title = online ? t("Atlas is reachable") : t("Check Atlas connection");
   }
-  if (maybe("metricState")) $("metricState").textContent = stateLabel;
+  if (maybe("metricState")) $("metricState").textContent = t(stateLabel);
   if (maybe("metricActive")) $("metricActive").textContent = String(summary.active || 0);
   if (maybe("metricErrors")) $("metricErrors").textContent = String(summary.errors || 0);
   renderRobotState(data);
@@ -2117,7 +2150,7 @@ function renderSystem(data) {
     label.textContent = item.label;
     const status = document.createElement("span");
     status.className = item.available ? "ok" : "warn";
-    status.textContent = item.available ? item.providers.join(", ") : "missing";
+    status.textContent = item.available ? item.providers.join(", ") : t("missing");
     row.append(label, status);
     contractRoot.appendChild(row);
   });
@@ -2138,7 +2171,7 @@ function renderSystem(data) {
     const title = document.createElement("strong");
     title.textContent = provider.id;
     const meta = document.createElement("span");
-    meta.textContent = `${provider.kind}  ${provider.state}  ${provider.capabilities.length} cap(s)`;
+    meta.textContent = `${provider.kind}  ${provider.state}  ${provider.capabilities.length} ${t("cap(s)")}`;
     row.append(title, meta);
     providerRoot.appendChild(row);
   });
@@ -2148,27 +2181,27 @@ function renderRobotState(data) {
   if (!document.querySelector("[data-robot-state-list]")) return;
   const contracts = data.requiredContracts || [];
   const summary = data.summary || {};
-  const recording = maybe("voiceState") ? $("voiceState").textContent === "recording" : false;
+  const recording = Boolean(state.voiceRecording);
   const audioReady = contractAvailable(contracts, "Speaker") || contractAvailable(contracts, "TTS");
   const rows = [
-    { label: "Base", icon: "B", ok: contractAvailable(contracts, "Executor") || contractAvailable(contracts, "Liaison submit"), status: "OK", value: "0.00 m/s", source: "mock" },
-    { label: "Arm", icon: "A", ok: summary.errors === 0, status: "OK", value: "Idle", source: "mock" },
-    { label: "Head / Camera", icon: "C", ok: true, status: "OK", value: "Tracking", source: "mock" },
-    { label: "Battery", icon: "P", ok: true, status: "86%", value: "2h 14m", source: "mock", battery: 86 },
-    { label: "Localization", icon: "L", ok: !data.error, status: "OK", value: "0.04 m", source: "mock", separated: true },
-    { label: "Navigation", icon: "N", ok: contractAvailable(contracts, "Executor"), status: state.busy ? "Moving" : "Ready", value: state.busy ? "0.32 m" : "0.00 m", source: "derived", warn: state.busy },
-    { label: "Audio Input", icon: "M", ok: contractAvailable(contracts, "Mic") || contractAvailable(contracts, "ASR"), status: recording ? "Listening" : "Standby", value: "", source: "real", wave: recording },
-    { label: "Audio Output", icon: "S", ok: audioReady, status: state.ttsPlaying ? "Speaking" : "Ready", value: "", source: "real", wave: state.ttsPlaying },
-    { label: "Connection", icon: "O", ok: !data.error, status: data.error ? "Offline" : "Online", value: "", source: "real", separated: true },
-    { label: "Safety", icon: "!", ok: summary.errors === 0, status: summary.errors ? `${summary.errors} error(s)` : "OK", value: "", source: "derived", danger: summary.errors > 0 },
+    { label: t("Base"), icon: "B", ok: contractAvailable(contracts, "Executor") || contractAvailable(contracts, "Liaison submit"), status: t("OK"), value: "0.00 m/s", source: "mock" },
+    { label: t("Arm"), icon: "A", ok: summary.errors === 0, status: t("OK"), value: t("Idle"), source: "mock" },
+    { label: t("Head / Camera"), icon: "C", ok: true, status: t("OK"), value: t("Tracking"), source: "mock" },
+    { label: t("Battery"), icon: "P", ok: true, status: "86%", value: "2h 14m", source: "mock", battery: 86 },
+    { label: t("Localization"), icon: "L", ok: !data.error, status: t("OK"), value: "0.04 m", source: "mock", separated: true },
+    { label: t("Navigation"), icon: "N", ok: contractAvailable(contracts, "Executor"), status: state.busy ? t("Moving") : t("Ready"), value: state.busy ? "0.32 m" : "0.00 m", source: "derived", warn: state.busy },
+    { label: t("Audio Input"), icon: "M", ok: contractAvailable(contracts, "Mic") || contractAvailable(contracts, "ASR"), status: recording ? t("Listening") : t("Standby"), value: "", source: "real", wave: recording },
+    { label: t("Audio Output"), icon: "S", ok: audioReady, status: state.ttsPlaying ? t("Speaking") : t("Ready"), value: "", source: "real", wave: state.ttsPlaying },
+    { label: t("Connection"), icon: "O", ok: !data.error, status: data.error ? t("Offline") : t("Online"), value: "", source: "real", separated: true },
+    { label: t("Safety"), icon: "!", ok: summary.errors === 0, status: summary.errors ? t("{count} error(s)", { count: summary.errors }) : t("OK"), value: "", source: "derived", danger: summary.errors > 0 },
   ];
-  setTextAll("[data-robot-mode]", data.error ? "Offline" : state.busy ? "Executing" : "Ready");
+  setTextAll("[data-robot-mode]", data.error ? t("Offline") : state.busy ? t("Executing") : t("Ready"));
   document.querySelectorAll("[data-robot-state-list]").forEach((root) => {
     clear(root);
     rows.forEach((item) => {
       const row = document.createElement("div");
       row.className = `robot-state-row${item.separated ? " separated" : ""}`;
-      row.title = `source: ${item.source}`;
+      row.title = t("source: {source}", { source: item.source });
       const icon = document.createElement("span");
       icon.className = `state-icon ${item.danger ? "danger" : item.ok ? "ok" : "warn"}`;
       icon.textContent = item.icon;
@@ -2271,7 +2304,7 @@ function latestImageAttachment() {
 /// already-numbered one yields "123 (3)" rather than compounding it into
 /// "123 (2) (2)".
 function uniqueConversationTitle(base, selfId) {
-  const stem = String(base).replace(/\s*\(\d+\)$/, "").trim() || "Untitled chat";
+  const stem = String(base).replace(/\s*\(\d+\)$/, "").trim() || t("Untitled chat");
   const taken = new Set(
     state.history.filter((item) => item.id !== selfId).map((item) => item.title)
   );
@@ -2287,7 +2320,7 @@ function persistCurrentConversation(titleHint = "", force = false) {
   if (!hasContent && !force) return;
   const existingIndex = state.history.findIndex((item) => item.id === state.sessionId);
   const existing = existingIndex >= 0 ? state.history[existingIndex] : null;
-  const baseTitle = state.sessionTitle || existing?.title || titleHint || firstUserMessage() || "Untitled chat";
+  const baseTitle = state.sessionTitle || existing?.title || titleHint || firstUserMessage() || t("Untitled chat");
   const title = uniqueConversationTitle(baseTitle, state.sessionId);
   state.sessionTitle = title;
   const conversation = {
@@ -2317,7 +2350,7 @@ function renderHistory() {
   if (!state.history.length) {
     const empty = document.createElement("div");
     empty.className = "history-empty";
-    empty.textContent = "No saved conversations yet.";
+    empty.textContent = t("No saved conversations yet.");
     root.appendChild(empty);
     return;
   }
@@ -2329,7 +2362,7 @@ function renderHistory() {
     open.className = "history-open";
     open.title = item.title;
     const title = document.createElement("strong");
-    title.textContent = item.title || "Untitled chat";
+    title.textContent = item.title || t("Untitled chat");
     const meta = document.createElement("span");
     meta.textContent = formatConversationTime(item.updatedAt);
     open.append(title, meta);
@@ -2337,9 +2370,9 @@ function renderHistory() {
     const rename = document.createElement("button");
     rename.type = "button";
     rename.className = "history-rename";
-    rename.title = "Rename conversation";
-    rename.setAttribute("aria-label", `Rename ${item.title || "conversation"}`);
-    rename.textContent = "Rename";
+    rename.title = t("Rename conversation");
+    rename.setAttribute("aria-label", t("Rename {name}", { name: item.title || t("conversation") }));
+    rename.textContent = t("Rename");
     rename.addEventListener("click", (event) => {
       event.stopPropagation();
       renameConversation(item.id);
@@ -2347,9 +2380,9 @@ function renderHistory() {
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "history-delete";
-    remove.title = "Delete conversation";
-    remove.setAttribute("aria-label", `Delete ${item.title || "conversation"}`);
-    remove.textContent = "Delete";
+    remove.title = t("Delete conversation");
+    remove.setAttribute("aria-label", t("Delete {name}", { name: item.title || t("conversation") }));
+    remove.textContent = t("Delete");
     remove.addEventListener("click", (event) => {
       event.stopPropagation();
       deleteConversation(item.id);
@@ -2363,13 +2396,13 @@ function renameConversation(sessionId) {
   // window.prompt blocks the event loop, which would stall a live event
   // stream, so renaming waits. Say so rather than ignoring the click.
   if (state.busy) {
-    addStatusLine("Renaming is unavailable while a task is running.");
+    addStatusLine(t("Renaming is unavailable while a task is running."));
     return;
   }
   if (sessionId === state.sessionId) persistCurrentConversation("", true);
   const conversation = state.history.find((item) => item.id === sessionId);
-  const currentTitle = conversation?.title || state.sessionTitle || firstUserMessage() || "Untitled chat";
-  const nextTitle = window.prompt("Rename session", currentTitle);
+  const currentTitle = conversation?.title || state.sessionTitle || firstUserMessage() || t("Untitled chat");
+  const nextTitle = window.prompt(t("Rename session"), currentTitle);
   if (nextTitle === null) return;
   const trimmed = nextTitle.trim();
   if (!trimmed) return;
@@ -2405,7 +2438,7 @@ function deleteConversation(sessionId) {
     state.batches = [];
     state.nodeStates = {};
     state.activeAgentId = null;
-    $("promptTitle").textContent = "What should Robonix do?";
+    $("promptTitle").textContent = t("What should Robonix do?");
     renderSessionChip();
     renderMessages();
     renderTimeline();
@@ -2429,7 +2462,7 @@ function clearHistory() {
   state.batches = [];
   state.nodeStates = {};
   state.activeAgentId = null;
-  $("promptTitle").textContent = "What should Robonix do?";
+  $("promptTitle").textContent = t("What should Robonix do?");
   renderMessages();
   renderTimeline();
   renderPlan();
@@ -2443,7 +2476,7 @@ function openConversation(sessionId) {
   // screen, so switching mid-flight would file another session's replies
   // here. Refuse, but say why -- returning silently reads as a dead list.
   if (state.busy) {
-    addStatusLine("A task is still running in this session. Abort it before switching conversations.");
+    addStatusLine(t("A task is still running in this session. Abort it before switching conversations."));
     return;
   }
   persistCurrentConversation();
@@ -2460,7 +2493,7 @@ function openConversation(sessionId) {
   state.batches = conversation.batches || [];
   state.nodeStates = conversation.nodeStates || {};
   state.activeAgentId = null;
-  $("promptTitle").textContent = conversation.title || "What should Robonix do?";
+  $("promptTitle").textContent = conversation.title || t("What should Robonix do?");
   renderSessionChip();
   $("taskInput").value = "";
   autoGrowInput();
@@ -2497,8 +2530,8 @@ function renderAudioRouteProviders(route) {
   const savedSpeaker = state.settings.speakerNodeId || "";
   clear(mic);
   clear(speaker);
-  routeOption(mic, "", "Select input primitive");
-  routeOption(speaker, "", "Select output primitive");
+  routeOption(mic, "", t("Select input primitive"));
+  routeOption(speaker, "", t("Select output primitive"));
   (route.micProviders || []).forEach((provider) => {
     routeOption(mic, provider.id, provider.namespace ? `${provider.id} (${provider.namespace})` : provider.id);
   });
@@ -2507,8 +2540,8 @@ function renderAudioRouteProviders(route) {
   });
   const micAvailable = (route.micProviders || []).some((provider) => provider.id === savedMic);
   const speakerAvailable = (route.speakerProviders || []).some((provider) => provider.id === savedSpeaker);
-  if (savedMic && !micAvailable) routeOption(mic, savedMic, `${savedMic} (unavailable)`);
-  if (savedSpeaker && !speakerAvailable) routeOption(speaker, savedSpeaker, `${savedSpeaker} (unavailable)`);
+  if (savedMic && !micAvailable) routeOption(mic, savedMic, t("{name} (unavailable)", { name: savedMic }));
+  if (savedSpeaker && !speakerAvailable) routeOption(speaker, savedSpeaker, t("{name} (unavailable)", { name: savedSpeaker }));
   mic.value = savedMic || "";
   speaker.value = savedSpeaker || "";
 }
@@ -2520,11 +2553,11 @@ function renderAudioRouteDevices(side, result) {
   const current = side === "mic" ? result.currentInputId : result.currentOutputId;
   const wantedKind = side === "mic" ? "input" : "output";
   clear(select);
-  routeOption(select, "", "OS default");
+  routeOption(select, "", t("OS default"));
   (result.devices || [])
     .filter((device) => device.kind === wantedKind || device.kind === "duplex")
     .forEach((device) => {
-      const suffix = [device.channels ? `${device.channels} ch` : "", device.note || ""].filter(Boolean).join(", ");
+      const suffix = [device.channels ? t("{channels} ch", { channels: device.channels }) : "", device.note || ""].filter(Boolean).join(", ");
       routeOption(select, device.id, suffix ? `${device.name} (${suffix})` : device.name || device.id);
     });
   const devices = result.devices || [];
@@ -2538,26 +2571,26 @@ function renderBridgeDeviceReadout(side, result, selectedId) {
   const target = maybe(side === "mic" ? "bridgeInputDevice" : "bridgeOutputDevice");
   if (!target) return;
   if (provider !== "audio_client_bridge") {
-    target.textContent = "Not using client bridge";
+    target.textContent = t("Not using client bridge");
     return;
   }
   const device = (result.devices || []).find((entry) => entry.id === selectedId);
   target.textContent = device
-    ? `${device.name}${device.channels ? ` (${device.channels} ch)` : ""}`
-    : "OS default";
+    ? `${device.name}${device.channels ? ` (${t("{channels} ch", { channels: device.channels })})` : ""}`
+    : t("OS default");
 }
 
 async function refreshAudioRoute() {
   const settings = collectSettings();
   if (!settings.atlasEndpoint) return;
-  setText("audioRouteStatus", "Discovering audio primitives from Atlas...");
+  setText("audioRouteStatus", t("Discovering audio primitives from Atlas..."));
   const route = await fetch("/api/audio-route/providers", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ settings }),
   }).then((response) => response.json()).catch((error) => ({ error: String(error) }));
   if (route.error) {
-    setText("audioRouteStatus", `Audio route unavailable: ${route.error}`);
+    setText("audioRouteStatus", t("Audio route unavailable: {error}", { error: route.error }));
     return;
   }
   state.audio.route = { ...state.audio.route, ...route };
@@ -2565,7 +2598,7 @@ async function refreshAudioRoute() {
   await Promise.all([loadAudioRouteDevices("mic"), loadAudioRouteDevices("speaker")]);
   state.settings = collectSettings();
   saveSettings();
-  setText("audioRouteStatus", "Route loaded. Apply to select devices in their providers.");
+  setText("audioRouteStatus", t("Route loaded. Apply to select devices in their providers."));
 }
 
 async function loadAudioRouteDevices(side) {
@@ -2574,7 +2607,7 @@ async function loadAudioRouteDevices(side) {
   if (!provider) {
     if (select) {
       clear(select);
-      routeOption(select, "", "OS default");
+      routeOption(select, "", t("OS default"));
     }
     return;
   }
@@ -2589,20 +2622,20 @@ async function loadAudioRouteDevices(side) {
   if (result.error) {
     if (select) {
       clear(select);
-      routeOption(select, "", `Unavailable: ${result.error}`);
+      routeOption(select, "", t("Unavailable: {error}", { error: result.error }));
       select.disabled = true;
     }
-    setText("audioRouteStatus", `${provider}: ${result.error}`);
+    setText("audioRouteStatus", t("{provider}: {error}", { provider, error: result.error }));
     return;
   }
   if (select) select.disabled = false;
   if (!(result.devices || []).length) {
     if (select) {
       clear(select);
-      routeOption(select, "", "No devices reported by provider");
+      routeOption(select, "", t("No devices reported by provider"));
       select.disabled = true;
     }
-    setText("audioRouteStatus", `${provider}: provider reported no devices`);
+    setText("audioRouteStatus", t("{provider}: provider reported no devices", { provider }));
     return;
   }
   if (side === "mic") state.audio.route.micDevices = result.devices || [];
@@ -2613,25 +2646,25 @@ async function loadAudioRouteDevices(side) {
 async function applyAudioRoute() {
   state.settings = collectSettings();
   await persistSettings().catch((error) => {
-    setText("audioRouteStatus", `Settings save failed: ${error}`);
+    setText("audioRouteStatus", t("Settings save failed: {error}", { error }));
   });
-  setText("audioRouteStatus", "Applying selected devices...");
+  setText("audioRouteStatus", t("Applying selected devices..."));
   const result = await fetch("/api/audio-route/apply", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ settings: state.settings }),
   }).then((response) => response.json()).catch((error) => ({ error: String(error) }));
   if (!result.ok) {
-    setText("audioRouteStatus", `Route apply failed: ${result.error || "unknown error"}`);
+    setText("audioRouteStatus", t("Route apply failed: {error}", { error: result.error || t("unknown error") }));
     return;
   }
   const count = Array.isArray(result.selected) ? result.selected.length : 0;
-  setText("audioRouteStatus", `Route applied to ${count} selected device${count === 1 ? "" : "s"}.`);
-  addTimeline("audio", "audio route applied");
+  setText("audioRouteStatus", t(count === 1 ? "Route applied to {count} selected device." : "Route applied to {count} selected devices.", { count }));
+  addTimeline("audio", t("audio route applied"));
 }
 
 async function startAudioServer() {
-  appendAudioLog("starting client audio device server");
+  appendAudioLog(t("starting client audio device server"));
   const result = await fetch("/api/audio-server/start", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -2662,7 +2695,7 @@ function audioServerOnce(path, body = null) {
   return new Promise((resolve) => {
     const url = audioServerWsUrl(path);
     if (!url) {
-      resolve({ ok: false, error: "client audio device server is not discovered; start or check it first" });
+      resolve({ ok: false, error: t("client audio device server is not discovered; start or check it first") });
       return;
     }
     const socket = new WebSocket(url);
@@ -2684,25 +2717,25 @@ function audioServerOnce(path, body = null) {
       try {
         done(JSON.parse(event.data));
       } catch (_) {
-        done({ ok: false, error: String(event.data || "invalid bridge response") });
+        done({ ok: false, error: String(event.data || t("invalid bridge response")) });
       }
     };
-    socket.onerror = () => done({ ok: false, error: `cannot connect ${url}` });
-    socket.onclose = () => done({ ok: false, error: `closed ${url}` });
+    socket.onerror = () => done({ ok: false, error: t("cannot connect {url}", { url }) });
+    socket.onclose = () => done({ ok: false, error: t("closed {url}", { url }) });
   });
 }
 
 async function loadAudioDevices() {
   const result = await audioServerOnce("/devices");
   if (!result || result.ok === false) {
-    appendAudioLog(`device refresh failed: ${result?.error || "unknown error"}`);
+    appendAudioLog(t("device refresh failed: {error}", { error: result?.error || t("unknown error") }));
     return;
   }
   state.audio.devices = Array.isArray(result.devices) ? result.devices : [];
   state.audio.inputCurrent = result.input_current ?? result.input_default ?? null;
   state.audio.outputCurrent = result.output_current ?? result.output_default ?? null;
   renderAudioDevices(result);
-  appendAudioLog(`loaded ${state.audio.devices.length} audio devices`);
+  appendAudioLog(t("loaded {count} audio devices", { count: state.audio.devices.length }));
 }
 
 function renderAudioDevices(result = {}) {
@@ -2717,7 +2750,7 @@ function renderAudioDevices(result = {}) {
     const opt = document.createElement("option");
     opt.value = String(device.id);
     const channels = kind === "input" ? device.max_input_channels : device.max_output_channels;
-    opt.textContent = `#${device.id} ${device.name} (${channels} ch)`;
+    opt.textContent = `#${device.id} ${device.name} (${t("{channels} ch", { channels })})`;
     return opt;
   };
   state.audio.devices
@@ -2736,9 +2769,9 @@ async function applyAudioDevices() {
   const body = {};
   if (input !== undefined && input !== "") body.input = Number(input);
   if (output !== undefined && output !== "") body.output = Number(output);
-  appendAudioLog(`applying devices ${JSON.stringify(body)}`);
+  appendAudioLog(t("applying devices {payload}", { payload: JSON.stringify(body) }));
   const result = await audioServerOnce("/set_device", body);
-  appendAudioLog(result.ok ? "device selection applied" : `device selection failed: ${result.error || "unknown error"}`);
+  appendAudioLog(result.ok ? t("device selection applied") : t("device selection failed: {error}", { error: result.error || t("unknown error") }));
   await loadAudioDevices();
 }
 
@@ -2755,8 +2788,9 @@ function startAudioVuStream() {
   const socket = new WebSocket(url);
   state.audio.vuSocket = socket;
   socket.onopen = () => {
-    setText("audioLevelState", "live");
-    appendAudioLog("VU connected");
+    state.audio.vuState = "live";
+    setText("audioLevelState", t("live"));
+    appendAudioLog(t("VU connected"));
   };
   socket.onmessage = (event) => {
     try {
@@ -2769,9 +2803,13 @@ function startAudioVuStream() {
       renderAudioLevel(0, 0);
     }
   };
-  socket.onerror = () => setText("audioLevelState", "offline");
+  socket.onerror = () => {
+    state.audio.vuState = "offline";
+    setText("audioLevelState", t("offline"));
+  };
   socket.onclose = () => {
-    setText("audioLevelState", "offline");
+    state.audio.vuState = "offline";
+    setText("audioLevelState", t("offline"));
     state.audio.vuSocket = null;
   };
 }
@@ -2782,9 +2820,9 @@ function startAudioLogStream() {
   if (!url) return;
   const socket = new WebSocket(url);
   state.audio.logSocket = socket;
-  socket.onopen = () => appendAudioLog("log stream connected");
+  socket.onopen = () => appendAudioLog(t("log stream connected"));
   socket.onmessage = (event) => appendAudioLog(event.data);
-  socket.onerror = () => appendAudioLog("log stream error");
+  socket.onerror = () => appendAudioLog(t("log stream error"));
   socket.onclose = () => {
     state.audio.logSocket = null;
   };
@@ -2804,7 +2842,7 @@ function renderAudioLevel(level, outputLevel = 0) {
   if (maybe("audioLevelBar")) $("audioLevelBar").style.width = `${Math.round(display * 100)}%`;
   const label = `${Math.round(display * 100)}%`;
   setText("audioLevelText", label);
-  if (maybe("audioLevelText")) $("audioLevelText").title = `raw RMS ${raw.toFixed(4)}`;
+  if (maybe("audioLevelText")) $("audioLevelText").title = t("raw RMS {value}", { value: raw.toFixed(4) });
   renderAudioBars();
 }
 
@@ -2876,7 +2914,7 @@ function appendAudioLog(line) {
     return `[${item.stamp}] ${item.text}${suffix}`;
   }).join("\n")}\n`;
   root.scrollTop = root.scrollHeight;
-  setText("audioLogSummary", "Audio device log.");
+  setText("audioLogSummary", t("Audio device log."));
 }
 
 function normalizeAudioLogLine(line) {
@@ -2902,12 +2940,12 @@ async function enrollVoice() {
   const userName = $("enrollUserName").value.trim() || userId;
   const seconds = Number($("recordSeconds").value || 6);
   if (!userId) {
-    renderEnroll({ ok: false, error: "Voice ID is required" });
+    renderEnroll({ ok: false, error: t("Voice ID is required") });
     return;
   }
-  $("enrollState").textContent = `recording ${seconds}s`;
+  $("enrollState").textContent = t("recording {seconds}s", { seconds });
   $("enrollVoice").classList.add("busy");
-  addTimeline("voiceprint", `recording ${seconds}s for ${userId}`);
+  addTimeline("voiceprint", t("recording {seconds}s for {userId}", { seconds, userId }));
   const result = await fetch("/api/voiceprint/enroll", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -2924,7 +2962,7 @@ async function enrollVoice() {
 
 async function testSpeaker() {
   $("testSpeaker").classList.add("busy");
-  addTimeline("audio", "speaker test requested");
+  addTimeline("audio", t("speaker test requested"));
   const result = await fetch("/api/audio/play-test", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -2935,8 +2973,8 @@ async function testSpeaker() {
   }).then((r) => r.json()).catch((error) => ({ ok: false, error: String(error) }));
   $("testSpeaker").classList.remove("busy");
   const text = result.ok
-    ? `speaker ok: played ${result.bytes} bytes via ${result.speakerEndpoint}`
-    : `speaker failed: ${result.error}`;
+    ? t("speaker ok: played {bytes} bytes via {endpoint}", { bytes: result.bytes, endpoint: result.speakerEndpoint })
+    : t("speaker failed: {error}", { error: result.error });
   const status = $("audioTestStatus");
   status.textContent = text;
   status.classList.toggle("is-error", !result.ok);
@@ -2946,14 +2984,14 @@ async function testSpeaker() {
   renderAudioServer({
     ok: result.ok,
     error: result.error || "",
-    url: result.ok ? `tts ${result.ttsEndpoint} / speaker ${result.speakerEndpoint}` : "",
+    url: result.ok ? t("tts {tts} / speaker {speaker}", { tts: result.ttsEndpoint, speaker: result.speakerEndpoint }) : "",
   });
 }
 
 async function testMicrophone() {
   const button = $("testMicrophone");
   button.classList.add("busy");
-  addTimeline("audio", "microphone test requested");
+  addTimeline("audio", t("microphone test requested"));
   const result = await fetch("/api/audio/mic-test", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -2961,8 +2999,8 @@ async function testMicrophone() {
   }).then((r) => r.json()).catch((error) => ({ ok: false, error: String(error) }));
   button.classList.remove("busy");
   const text = result.ok
-    ? `microphone ok: ${result.bytes} bytes in ${result.captureMs} ms, RMS ${result.rms}`
-    : `microphone failed: ${result.error}`;
+    ? t("microphone ok: {bytes} bytes in {ms} ms, RMS {rms}", { bytes: result.bytes, ms: result.captureMs, rms: result.rms })
+    : t("microphone failed: {error}", { error: result.error });
   const status = $("audioTestStatus");
   status.textContent = text;
   status.classList.toggle("is-error", !result.ok);
@@ -2973,13 +3011,13 @@ async function testMicrophone() {
 }
 
 function renderEnroll(result) {
-  $("enrollState").textContent = result.ok ? "enrolled" : "failed";
+  $("enrollState").textContent = result.ok ? t("enrolled") : t("failed");
   if (result.ok && result.userId) {
     applyVoiceUser(result.userId);
   }
   const text = result.ok
-    ? `${result.alreadyEnrolled ? "using existing" : "enrolled"} voice:${result.userId} (${result.bytes} bytes)`
-    : `enroll failed: ${result.error}`;
+    ? t(`${result.alreadyEnrolled ? "using existing" : "enrolled"} voice:{userId} ({bytes} bytes)`, { userId: result.userId, bytes: result.bytes })
+    : t("enroll failed: {error}", { error: result.error });
   addTimeline("voiceprint", text);
   const root = $("audioServerStatus");
   clear(root);
@@ -3017,10 +3055,10 @@ function renderAudioServer(result) {
   clear(root);
   if (result.wsUrl) state.audio.wsUrl = result.wsUrl;
   const online = Boolean(result.ok || result.reachable);
-  setText("audioServerState", online ? "online" : "offline");
-  setText("audioServerSummary", online ? (result.url || result.wsUrl || "Audio device server reachable.") : (result.error || "Client audio device server is offline."));
+  setText("audioServerState", online ? t("online") : t("offline"));
+  setText("audioServerSummary", online ? (result.url || result.wsUrl || t("Audio device server reachable.")) : (result.error || t("Client audio device server is offline.")));
   const lines = [
-    online ? "ok" : "not reachable",
+    online ? t("ok") : t("not reachable"),
     result.error || "",
     result.wsUrl || "",
     result.uiUrl || result.url || "",
@@ -3051,8 +3089,8 @@ function setButtonLabel(node, text) {
 function setBusy(value) {
   state.busy = value;
   $("sendButton").classList.toggle("busy", value);
-  setButtonLabel($("sendButton"), "Send");
-  $("sendButton").title = value ? "Send to the running task (Enter)" : "Send task (Enter)";
+  setButtonLabel($("sendButton"), t("Send"));
+  $("sendButton").title = value ? t("Send to the running task (Enter)") : t("Send task (Enter)");
   $("stopButton").hidden = !value;
   // Left enabled while busy on purpose: a disabled button swallows the click
   // and the "abort the running task first" guard never gets to explain
@@ -3065,7 +3103,7 @@ function setBusy(value) {
     // Same button either way: it starts a recording. Whether that recording
     // opens a new task or adds to the running one is context, not a separate
     // control, so the label stays put and only the tooltip explains it.
-    setButtonLabel(button, "Start recording");
+    setButtonLabel(button, t("Start recording"));
   });
   // syncVoiceControls owns the tooltip and the hidden state for this button.
   syncVoiceControls();
@@ -3614,5 +3652,29 @@ window.addEventListener("robonix:page", (event) => {
     stopPerception();
   }
 });
+
+/// Re-render every dynamic region after a language switch. Static markup is
+/// handled by i18n.js walking data-i18n; this covers everything app.js writes
+/// from state. promptTitle is excluded from data-i18n for the same reason:
+/// it shows the live session title once one exists.
+function handleI18nChange() {
+  if (maybe("promptTitle")) {
+    $("promptTitle").textContent = state.sessionTitle || t("What should Robonix do?");
+  }
+  renderSessionChip();
+  renderMessages();
+  renderTimeline();
+  renderPlan();
+  renderActivePlans(state.activePlansError);
+  renderHistory();
+  renderHandsfree();
+  syncVoiceControls();
+  setText("voiceState", state.voiceRecording ? t("recording") : t("ready"));
+  setText("audioLevelState", t(state.audio.vuState));
+  if (state.lastSystemData) renderSystem(state.lastSystemData);
+  setBusy(state.busy);
+}
+
+window.addEventListener("robonix:i18n", handleI18nChange);
 
 init();
