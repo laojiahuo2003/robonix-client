@@ -4028,6 +4028,10 @@ select:focus {
   padding: 4px 20px 20px;
 }
 
+.perception-grid[hidden] {
+  display: none !important;
+}
+
 .perception-tile {
   display: flex;
   flex-direction: column;
@@ -4134,16 +4138,115 @@ select:focus {
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.perception-tile-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at center, rgba(16, 26, 31, 0.4) 0%, #0b1618 100%);
+  pointer-events: none;
+  z-index: 1;
+  transition: opacity 200ms ease;
+}
+
+.perception-tile-placeholder.has-feed {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.perception-placeholder-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+  z-index: 2;
+}
+
+.perception-placeholder-crosshair {
+  position: absolute;
+  width: 90px;
+  height: 90px;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.perception-placeholder-crosshair::before,
+.perception-placeholder-crosshair::after {
+  content: "";
+  position: absolute;
+  background: rgba(95, 205, 216, 0.12);
+}
+
+.perception-placeholder-crosshair::before {
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+}
+
+.perception-placeholder-crosshair::after {
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+}
+
+.perception-placeholder-icon {
+  width: 32px;
+  height: 32px;
+  stroke: var(--dim);
+  opacity: 0.65;
+  transition: stroke 150ms ease;
+}
+
+.perception-placeholder-badge {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(241, 186, 79, 0.12);
+  color: var(--amber);
+  border: 1px solid rgba(241, 186, 79, 0.25);
+}
+
+.perception-placeholder-hint {
+  font-size: 11px;
+  color: var(--dim);
 }
 
 .perception-camera-img {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  opacity: 0;
+  transition: opacity 250ms ease;
+  z-index: 2;
+  position: relative;
+}
+
+.perception-camera-img:not([src]),
+.perception-camera-img[src=""] {
+  display: none !important;
+}
+
+.perception-camera-img.loaded {
+  opacity: 1;
 }
 
 .perception-canvas-body {
   display: block;
+  position: relative;
 }
 
 .perception-canvas {
@@ -4157,16 +4260,298 @@ select:focus {
   touch-action: none;
 }
 
+/* ── Cybernetic Standby Hub (Global Empty State) ─────────────────────── */
+
 .perception-empty {
-  padding: 48px 16px;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 20px;
+  overflow-y: auto;
+}
+
+.perception-empty-card {
+  max-width: 620px;
+  width: 100%;
+  background: linear-gradient(180deg, rgba(19, 33, 40, 0.9) 0%, rgba(11, 22, 24, 0.95) 100%);
+  border: 1px solid rgba(95, 205, 216, 0.2);
+  border-radius: 18px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  padding: 36px 30px 28px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.perception-empty-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 20%;
+  right: 20%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+  opacity: 0.7;
+}
+
+.perception-radar-halo {
+  width: 96px;
+  height: 96px;
+  position: relative;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.radar-circle {
+  position: absolute;
+  border-radius: 50%;
+  border: 1px solid rgba(95, 205, 216, 0.25);
+}
+
+.radar-c1 {
+  width: 40px;
+  height: 40px;
+}
+
+.radar-c2 {
+  width: 68px;
+  height: 68px;
+  border-style: dashed;
+  opacity: 0.65;
+}
+
+.radar-c3 {
+  width: 96px;
+  height: 96px;
+  border-color: rgba(95, 205, 216, 0.16);
+  animation: radar-pulse 3s infinite ease-out;
+}
+
+.radar-sweep {
+  position: absolute;
+  width: 90px;
+  height: 90px;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg at 50% 50%, rgba(95, 205, 216, 0.32) 0deg, rgba(95, 205, 216, 0) 65deg, transparent 360deg);
+  animation: radar-spin 4s linear infinite;
+  pointer-events: none;
+}
+
+.radar-center-icon {
+  width: 22px;
+  height: 22px;
+  stroke: var(--cyan);
+  z-index: 2;
+  position: relative;
+}
+
+@keyframes radar-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes radar-pulse {
+  0% { transform: scale(0.9); opacity: 0.8; }
+  50% { transform: scale(1.06); opacity: 0.25; }
+  100% { transform: scale(0.9); opacity: 0.8; }
+}
+
+.perception-empty-pill {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: rgba(95, 205, 216, 0.1);
+  color: var(--cyan);
+  border: 1px solid rgba(95, 205, 216, 0.25);
+  margin-bottom: 12px;
+  display: inline-block;
+}
+
+.perception-empty-text h3 {
+  margin: 0 0 8px;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+.perception-empty-text p {
+  margin: 0 auto;
+  max-width: 480px;
+  font-size: 13px;
+  line-height: 1.5;
   color: var(--muted);
-  font-size: 14px;
+}
+
+.perception-empty-diagnostics {
+  width: 100%;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.perception-diag-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  font-size: 12px;
+}
+
+.perception-diag-label {
+  color: var(--dim);
+}
+
+.perception-diag-val {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--cyan);
+  background: rgba(95, 205, 216, 0.08);
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(95, 205, 216, 0.2);
+}
+
+.perception-channel-matrix {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.perception-channel-card {
+  background: rgba(16, 26, 31, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: border-color 150ms ease, background 150ms ease;
+}
+
+.perception-channel-card:hover {
+  border-color: rgba(95, 205, 216, 0.25);
+  background: rgba(19, 33, 40, 0.85);
+}
+
+.channel-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.channel-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.channel-dot.offline {
+  background: var(--dim);
+  opacity: 0.5;
+}
+
+.channel-dot.online {
+  background: var(--green);
+  box-shadow: 0 0 6px rgba(111, 209, 125, 0.6);
+}
+
+.channel-head strong {
+  color: var(--text);
+  flex: 1;
+}
+
+.channel-status {
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(101, 118, 124, 0.2);
+  color: var(--dim);
+}
+
+.channel-status.online {
+  background: rgba(111, 209, 125, 0.15);
+  color: var(--green);
+}
+
+.channel-desc {
+  font-size: 11px;
+  color: var(--dim);
+  line-height: 1.3;
+}
+
+.channel-contract {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  color: rgba(154, 169, 173, 0.65);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+.perception-empty-actions {
+  margin-top: 24px;
+}
+
+.perception-retry-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  background: var(--panel-3);
+  border: 1px solid rgba(95, 205, 216, 0.25);
+  border-radius: 8px;
+  padding: 8px 20px;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.perception-retry-btn:hover {
+  background: #1f3640;
+  border-color: var(--cyan);
+  box-shadow: 0 0 16px rgba(95, 205, 216, 0.25);
+}
+
+.perception-retry-btn.loading .retry-icon {
+  animation: spin 1s linear infinite;
+}
+
+.retry-icon {
+  width: 14px;
+  height: 14px;
+  stroke: var(--cyan);
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 @media (max-width: 720px) {
   .perception-grid {
     grid-template-columns: 1fr;
     grid-auto-rows: minmax(240px, 1fr);
+  }
+
+  .perception-channel-matrix {
+    grid-template-columns: 1fr;
   }
 }

@@ -484,6 +484,25 @@
     "LiDAR data unavailable": "激光雷达数据不可用",
     "Map data unavailable": "地图数据不可用",
     "Data source status": "数据源状态",
+    "No sensor or spatial data to display": "该部署没有可显示的传感器或空间数据",
+    "Sensor Array Inactive": "传感器阵列待机",
+    "No Active Sensor Streams": "无活动传感器数据流",
+    "The connected deployment currently exposes no active perception contracts or ROS 2 sensor bridges.": "当前连接的部署未公开任何活动的感知契约或 ROS 2 传感器桥接。",
+    "Target Endpoint:": "目标端点：",
+    "Retry Probe": "重新探测",
+    "Probing...": "正在探测…",
+    "STANDBY": "待机",
+    "NO SIGNAL": "无信号",
+    "Awaiting video feed...": "等待视频流接入…",
+    "Awaiting depth feed...": "等待深度流接入…",
+    "Awaiting LiDAR scan...": "等待激光雷达扫描…",
+    "Spatial context inactive": "空间上下文未激活",
+    "RGB Camera snapshot stream": "RGB 摄像头快照流",
+    "Depth Camera point & depth map": "深度相机深度图",
+    "2D LiDAR planar laser scan": "2D 激光雷达平面扫描",
+    "Semantic scene objects & regions": "语义场景物体与区域",
+    "Connected": "已连接",
+    "Unavailable": "未就绪",
   };
 
   function detectLang() {
@@ -527,6 +546,9 @@
     });
     document.querySelectorAll("[data-i18n-aria-label]").forEach((node) => {
       node.setAttribute("aria-label", t(node.dataset.i18nAriaLabel));
+    });
+    document.querySelectorAll("[data-i18n-alt]").forEach((node) => {
+      node.setAttribute("alt", t(node.dataset.i18nAlt));
     });
   }
 

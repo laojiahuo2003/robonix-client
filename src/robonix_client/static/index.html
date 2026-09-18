@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Robonix Client</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260904a" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260918b" />
   </head>
   <body>
     <div class="app-shell">
@@ -167,7 +167,18 @@
                   <span class="perception-tile-meta" data-tile-meta></span>
                 </header>
                 <div class="perception-tile-body perception-camera-body">
-                  <img class="perception-camera-img" data-camera-img alt="RGB camera" draggable="false" />
+                  <div class="perception-tile-placeholder" data-tile-placeholder="camera">
+                    <div class="perception-placeholder-content">
+                      <div class="perception-placeholder-crosshair"></div>
+                      <svg class="perception-placeholder-icon" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                        <circle cx="12" cy="13" r="4"/>
+                      </svg>
+                      <span class="perception-placeholder-badge" data-i18n="NO SIGNAL">NO SIGNAL</span>
+                      <span class="perception-placeholder-hint" data-i18n="Awaiting video feed...">Awaiting video feed...</span>
+                    </div>
+                  </div>
+                  <img class="perception-camera-img" data-camera-img alt="RGB camera" data-i18n-alt="Camera" draggable="false" />
                 </div>
               </section>
               <section class="perception-tile" data-tile="depth">
@@ -176,7 +187,19 @@
                   <span class="perception-tile-meta" data-tile-meta></span>
                 </header>
                 <div class="perception-tile-body perception-camera-body">
-                  <img class="perception-camera-img" data-depth-img alt="Depth camera" draggable="false" />
+                  <div class="perception-tile-placeholder" data-tile-placeholder="depth">
+                    <div class="perception-placeholder-content">
+                      <div class="perception-placeholder-crosshair"></div>
+                      <svg class="perception-placeholder-icon" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M12 2v20M2 12h20"/>
+                        <circle cx="12" cy="12" r="9"/>
+                        <circle cx="12" cy="12" r="5" stroke-dasharray="3 3"/>
+                      </svg>
+                      <span class="perception-placeholder-badge" data-i18n="STANDBY">STANDBY</span>
+                      <span class="perception-placeholder-hint" data-i18n="Awaiting depth feed...">Awaiting depth feed...</span>
+                    </div>
+                  </div>
+                  <img class="perception-camera-img" data-depth-img alt="Depth camera" data-i18n-alt="Depth Camera" draggable="false" />
                 </div>
               </section>
               <section class="perception-tile" data-tile="lidar">
@@ -202,7 +225,6 @@
                       <label class="perception-layer"><input type="checkbox" data-scene-layer="objects" checked /><span data-i18n="objects">objects</span></label>
                       <label class="perception-layer"><input type="checkbox" data-scene-layer="robot" checked /><span data-i18n="robot">robot</span></label>
                     </div>
-                    </div>
                     <span class="perception-tile-meta" data-tile-meta></span>
                   </div>
                 </header>
@@ -212,7 +234,79 @@
               </section>
             </div>
             <div class="perception-empty" id="perceptionEmpty" hidden>
-              <p>This deployment exposes no sensor or spatial data the client can display.</p>
+              <div class="perception-empty-card">
+                <div class="perception-radar-halo" aria-hidden="true">
+                  <div class="radar-circle radar-c1"></div>
+                  <div class="radar-circle radar-c2"></div>
+                  <div class="radar-circle radar-c3"></div>
+                  <div class="radar-sweep"></div>
+                  <svg class="radar-center-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M12 2a10 10 0 0 1 10 10M12 6a6 6 0 0 1 6 6M12 22a10 10 0 0 1-10-10M12 18a6 6 0 0 1-6-6"/>
+                  </svg>
+                </div>
+
+                <div class="perception-empty-text">
+                  <span class="perception-empty-pill" data-i18n="Sensor Array Inactive">Sensor Array Inactive</span>
+                  <h3 data-i18n="No Active Sensor Streams">No Active Sensor Streams</h3>
+                  <p data-i18n="The connected deployment currently exposes no active perception contracts or ROS 2 sensor bridges.">The connected deployment currently exposes no active perception contracts or ROS 2 sensor bridges.</p>
+                </div>
+
+                <div class="perception-empty-diagnostics">
+                  <div class="perception-diag-row">
+                    <span class="perception-diag-label" data-i18n="Target Endpoint:">Target Endpoint:</span>
+                    <code class="perception-diag-val" id="perceptionEmptyEndpoint">127.0.0.1:50051</code>
+                  </div>
+                  <div class="perception-channel-matrix">
+                    <div class="perception-channel-card" data-channel="camera">
+                      <div class="channel-head">
+                        <span class="channel-dot offline"></span>
+                        <strong data-i18n="Camera">Camera</strong>
+                        <span class="channel-status" data-i18n="Offline">Offline</span>
+                      </div>
+                      <span class="channel-desc" data-i18n="RGB Camera snapshot stream">RGB Camera snapshot stream</span>
+                      <code class="channel-contract">camera/snapshot</code>
+                    </div>
+                    <div class="perception-channel-card" data-channel="depth">
+                      <div class="channel-head">
+                        <span class="channel-dot offline"></span>
+                        <strong data-i18n="Depth Camera">Depth Camera</strong>
+                        <span class="channel-status" data-i18n="Offline">Offline</span>
+                      </div>
+                      <span class="channel-desc" data-i18n="Depth Camera point & depth map">Depth Camera point & depth map</span>
+                      <code class="channel-contract">camera/depth_snapshot</code>
+                    </div>
+                    <div class="perception-channel-card" data-channel="lidar">
+                      <div class="channel-head">
+                        <span class="channel-dot offline"></span>
+                        <strong data-i18n="LiDAR">LiDAR</strong>
+                        <span class="channel-status" data-i18n="Offline">Offline</span>
+                      </div>
+                      <span class="channel-desc" data-i18n="2D LiDAR planar laser scan">2D LiDAR planar laser scan</span>
+                      <code class="channel-contract">lidar/snapshot</code>
+                    </div>
+                    <div class="perception-channel-card" data-channel="scene">
+                      <div class="channel-head">
+                        <span class="channel-dot offline"></span>
+                        <strong data-i18n="Scene Map">Scene Map</strong>
+                        <span class="channel-status" data-i18n="Offline">Offline</span>
+                      </div>
+                      <span class="channel-desc" data-i18n="Semantic scene objects & regions">Semantic scene objects & regions</span>
+                      <code class="channel-contract">scene/get_robot_context</code>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="perception-empty-actions">
+                  <button class="perception-retry-btn" type="button" id="perceptionRetryBtn">
+                    <svg class="retry-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M23 4v6h-6M1 20v-6h6"/>
+                      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                    </svg>
+                    <span data-i18n="Retry Probe">Retry Probe</span>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </section>
@@ -571,8 +665,8 @@
       </section>
     </div>
 
-    <script src="/static/i18n.js?v=20260904a"></script>
-    <script src="/static/app.js?v=20260904a"></script>
-    <script src="/static/vitals.bundle.js?v=20260904a"></script>
+    <script src="/static/i18n.js?v=20260918b"></script>
+    <script src="/static/app.js?v=20260918b"></script>
+    <script src="/static/vitals.bundle.js?v=20260918b"></script>
   </body>
 </html>

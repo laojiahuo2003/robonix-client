@@ -3270,20 +3270,27 @@ function applyPerceptionLayout() {
 
 async function perceptionPollImage(id, endpoint) {
   const img = document.querySelector(`[data-${id}-img]`);
+  const placeholder = document.querySelector(`[data-tile-placeholder="${id}"]`);
   if (!img) return;
   const started = performance.now();
   try {
     const data = await perceptionFetch(endpoint);
     if (!data.ok || !data.image || !data.image.data) {
       perceptionMeta(id, data.error || t("No image data"));
+      img.classList.remove("loaded");
+      if (placeholder) placeholder.classList.remove("has-feed");
       return;
     }
     const src = `data:image/${data.image.encoding || "jpeg"};base64,${data.image.data}`;
     if (img.getAttribute("src") !== src) img.setAttribute("src", src);
+    img.classList.add("loaded");
+    if (placeholder) placeholder.classList.add("has-feed");
     const ms = Math.round(performance.now() - started);
     perceptionMeta(id, `${data.image.width}×${data.image.height} · ${ms}ms`);
   } catch (_) {
     perceptionMeta(id, t("Offline"));
+    img.classList.remove("loaded");
+    if (placeholder) placeholder.classList.remove("has-feed");
   }
 }
 
@@ -3362,6 +3369,57 @@ function drawLidarHeading(ctx, w, h, cx, cy, reach, frameId) {
   ctx.fillStyle = ink;
   ctx.textAlign = "right";
   ctx.fillText("front →", w - 8, h - 8);
+}
+
+function drawLidarStandby(canvas) {
+  const { ctx, w, h } = fitCanvas(canvas);
+  const cx = w / 2;
+  const cy = h / 2;
+  const maxRange = 6.0;
+  const scale = (Math.min(w, h) / 2 - 20) / maxRange;
+
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = "#0b1618";
+  ctx.fillRect(0, 0, w, h);
+
+  // Crosshair axes
+  ctx.strokeStyle = "rgba(95, 205, 216, 0.08)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(cx, 16); ctx.lineTo(cx, h - 16);
+  ctx.moveTo(16, cy); ctx.lineTo(w - 16, cy);
+  ctx.stroke();
+
+  // Radar distance concentric rings
+  for (let r = 1; r <= Math.floor(maxRange); r += 1) {
+    ctx.strokeStyle = r === Math.floor(maxRange) ? "rgba(95, 205, 216, 0.22)" : "rgba(120, 140, 180, 0.12)";
+    ctx.setLineDash(r % 2 === 0 ? [3, 3] : []);
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * scale, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(154, 169, 173, 0.35)";
+    ctx.font = "9px ui-monospace, SFMono-Regular, Menlo, monospace";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "bottom";
+    ctx.fillText(`${r}m`, cx + r * scale + 3, cy - 2);
+  }
+  ctx.setLineDash([]);
+
+  drawLidarHeading(ctx, w, h, cx, cy, maxRange * scale, "standby");
+
+  // Center robot indicator
+  ctx.fillStyle = "rgba(255, 209, 102, 0.6)";
+  ctx.beginPath();
+  ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Center standby hint
+  ctx.fillStyle = "rgba(154, 169, 173, 0.45)";
+  ctx.font = "11px Inter, system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(t("Awaiting LiDAR scan..."), cx, cy + 30);
 }
 
 function scenePoint(x, y) {
@@ -3519,7 +3577,70 @@ function drawObjectLabels(ctx, candidates) {
 
 function redrawScene() {
   const canvas = document.querySelector("[data-scene-canvas]");
-  if (canvas && perception.lastScene) drawScene(canvas, perception.lastScene);
+  if (canvas) {
+    if (perception.lastScene) drawScene(canvas, perception.lastScene);
+    else drawSceneStandby(canvas);
+  }
+}
+
+function drawSceneStandby(canvas) {
+  const { ctx, w, h } = fitCanvas(canvas);
+  const cx = w / 2;
+  const cy = h / 2;
+
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = "#0b1618";
+  ctx.fillRect(0, 0, w, h);
+
+  // Subtle coordinate grid
+  const gridSize = 40;
+  ctx.strokeStyle = "rgba(95, 205, 216, 0.05)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  const startX = cx % gridSize;
+  for (let x = startX; x < w; x += gridSize) {
+    ctx.moveTo(x, 0); ctx.lineTo(x, h);
+  }
+  const startY = cy % gridSize;
+  for (let y = startY; y < h; y += gridSize) {
+    ctx.moveTo(0, y); ctx.lineTo(w, y);
+  }
+  ctx.stroke();
+
+  // Origin coordinate axes (+X red/orange, +Y cyan)
+  const axisLen = 32;
+  ctx.strokeStyle = "rgba(240, 103, 88, 0.85)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy); ctx.lineTo(cx + axisLen, cy);
+  ctx.stroke();
+  ctx.fillStyle = "rgba(240, 103, 88, 0.85)";
+  ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.fillText("+X", cx + axisLen + 4, cy);
+
+  ctx.strokeStyle = "rgba(95, 205, 216, 0.85)";
+  ctx.beginPath();
+  ctx.moveTo(cx, cy); ctx.lineTo(cx, cy - axisLen);
+  ctx.stroke();
+  ctx.fillStyle = "rgba(95, 205, 216, 0.85)";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "bottom";
+  ctx.fillText("+Y", cx, cy - axisLen - 3);
+
+  // Origin point
+  ctx.fillStyle = "#eef4f3";
+  ctx.beginPath();
+  ctx.arc(cx, cy, 2.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Watermark text
+  ctx.fillStyle = "rgba(154, 169, 173, 0.4)";
+  ctx.font = "12px Inter, system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(t("Spatial context inactive"), cx, cy + 34);
 }
 
 function drawScene(canvas, scene) {
@@ -3710,6 +3831,7 @@ async function perceptionPollLidar() {
     if (!data.ok || !data.scan) {
       perceptionMeta("lidar", data.error || t("LiDAR data unavailable"));
       perception.lastLidarScan = null;
+      drawLidarStandby(canvas);
       return;
     }
     perception.lastLidarScan = data.scan;
@@ -3718,6 +3840,7 @@ async function perceptionPollLidar() {
   } catch (_) {
     perceptionMeta("lidar", t("Offline"));
     perception.lastLidarScan = null;
+    drawLidarStandby(canvas);
   }
 }
 
@@ -3730,11 +3853,13 @@ async function perceptionPollScene() {
   } catch (_) {
     perceptionMeta("scene", t("Offline"));
     perception.lastScene = null;
+    drawSceneStandby(canvas);
     return;
   }
   if (!data.ok || !data.scene) {
     perceptionMeta("scene", data.error || t("Map data unavailable"));
     perception.lastScene = null;
+    drawSceneStandby(canvas);
     return;
   }
   perception.lastScene = data.scene;
@@ -3809,7 +3934,46 @@ function renderPerceptionStrip(tiles) {
   }
 }
 
+function updatePerceptionEmptyDiagnostics(tiles) {
+  const ep = document.getElementById("perceptionEmptyEndpoint");
+  if (ep) ep.textContent = perceptionAtlas();
+  for (const id of ["camera", "depth", "lidar", "scene"]) {
+    const card = document.querySelector(`.perception-channel-card[data-channel="${id}"]`);
+    if (card) {
+      const isOnline = !!tiles[id];
+      const dot = card.querySelector(".channel-dot");
+      if (dot) {
+        dot.classList.toggle("online", isOnline);
+        dot.classList.toggle("offline", !isOnline);
+      }
+      const st = card.querySelector(".channel-status");
+      if (st) {
+        st.classList.toggle("online", isOnline);
+        st.textContent = isOnline ? t("Connected") : t("Offline");
+      }
+    }
+  }
+}
+
+function bindPerceptionRetry() {
+  const btn = document.getElementById("perceptionRetryBtn");
+  if (!btn || btn.dataset.retryBound) return;
+  btn.dataset.retryBound = "1";
+  btn.addEventListener("click", async () => {
+    btn.classList.add("loading");
+    btn.disabled = true;
+    try {
+      await perceptionRefresh();
+      if (perception.polling) await perceptionRound();
+    } finally {
+      btn.classList.remove("loading");
+      btn.disabled = false;
+    }
+  });
+}
+
 async function perceptionRefresh() {
+  bindPerceptionRetry();
   try {
     const data = await perceptionFetch("status");
     const tiles = (data && data.tiles) || {};
@@ -3827,10 +3991,16 @@ async function perceptionRefresh() {
     if (mapLayer) mapLayer.closest(".perception-layer").hidden = !perception.mapAvailable;
     applyPerceptionLayout();
     renderPerceptionStrip(tiles);
+    updatePerceptionEmptyDiagnostics(tiles);
+    const grid = document.getElementById("perceptionGrid");
+    if (grid) grid.hidden = !any;
     const empty = document.getElementById("perceptionEmpty");
     if (empty) empty.hidden = any;
   } catch (_) {
     renderPerceptionStrip({});
+    updatePerceptionEmptyDiagnostics({});
+    const grid = document.getElementById("perceptionGrid");
+    if (grid) grid.hidden = true;
     const empty = document.getElementById("perceptionEmpty");
     if (empty) empty.hidden = false;
   }
@@ -3956,6 +4126,8 @@ function bindSceneView() {
 }
 
 function startPerception() {
+  bindPerceptionRetry();
+  redrawPerceptionCanvases();
   if (perception.polling) return;
   perception.polling = true;
   perceptionRefresh();
@@ -3972,12 +4144,14 @@ function redrawPerceptionCanvases() {
   const lidarCanvas = document.querySelector("[data-lidar-canvas]");
   const sceneCanvas = document.querySelector("[data-scene-canvas]");
 
-  if (lidarCanvas && perception.lastLidarScan) {
-    drawLidar(lidarCanvas, perception.lastLidarScan);
+  if (lidarCanvas) {
+    if (perception.lastLidarScan) drawLidar(lidarCanvas, perception.lastLidarScan);
+    else drawLidarStandby(lidarCanvas);
   }
 
-  if (sceneCanvas && perception.lastScene) {
-    drawScene(sceneCanvas, perception.lastScene);
+  if (sceneCanvas) {
+    if (perception.lastScene) drawScene(sceneCanvas, perception.lastScene);
+    else drawSceneStandby(sceneCanvas);
   }
 }
 
@@ -4021,6 +4195,8 @@ function handleI18nChange() {
   setText("audioLevelState", t(state.audio.vuState));
   if (state.lastSystemData) renderSystem(state.lastSystemData);
   setBusy(state.busy);
+  updatePerceptionEmptyDiagnostics((perception && perception.tiles) || {});
+  redrawPerceptionCanvases();
 }
 
 window.addEventListener("robonix:i18n", handleI18nChange);
