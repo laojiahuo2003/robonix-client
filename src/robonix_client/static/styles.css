@@ -3969,78 +3969,239 @@ select:focus {
   overflow: hidden;
 }
 
+/* ── Perception Header & Toolbar ─────────────────────────────────────────── */
+
 .perception-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 16px;
-  padding: 18px 20px 12px;
+  padding: 16px 20px 12px;
   background: transparent;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.perception-title-group {
+  display: flex;
+  align-items: center;
+  gap: 14px;
 }
 
 .perception-eyebrow {
   display: block;
-  font-size: 11px;
-  letter-spacing: 0.06em;
+  font-size: 10px;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 .perception-title-line h2 {
   margin: 0;
   font-size: 20px;
-  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.perception-health-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(53, 224, 160, 0.08);
+  border: 1px solid rgba(53, 224, 160, 0.22);
+  color: #35e0a0;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.02em;
+}
+
+.pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #35e0a0;
+  box-shadow: 0 0 8px #35e0a0;
+  animation: pulse-glow 2s infinite ease-in-out;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.85); }
+}
+
+.perception-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.perception-layout-switcher {
+  display: inline-flex;
+  background: rgba(14, 25, 30, 0.85);
+  border: 1px solid rgba(95, 205, 216, 0.15);
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+}
+
+.layout-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: none;
+  color: var(--dim);
+  padding: 5px 9px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.layout-btn:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.layout-btn.active {
+  background: rgba(95, 205, 216, 0.18);
+  color: #5ad1e6;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.perception-control-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(14, 25, 30, 0.85);
+  border: 1px solid rgba(95, 205, 216, 0.15);
+  border-radius: 8px;
+  padding: 5px 12px;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.perception-control-btn:hover {
+  background: rgba(22, 38, 45, 0.95);
+  border-color: rgba(95, 205, 216, 0.35);
+  color: #5ad1e6;
+}
+
+.perception-control-btn.paused {
+  background: rgba(241, 186, 79, 0.12);
+  border-color: rgba(241, 186, 79, 0.35);
+  color: var(--amber);
+}
+
+.perception-control-btn.paused .pause-icon {
+  display: none !important;
+}
+
+.perception-control-btn.paused .play-icon {
+  display: inline-block !important;
 }
 
 .perception-source-strip {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  justify-content: flex-end;
+  gap: 6px;
+  align-items: center;
 }
 
 .perception-source-chip {
-  font-family: ui-monospace, SFMono-Regular, Menlo, "Cascadia Mono", monospace;
-  font-size: 11px;
-  padding: 3px 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  padding: 3px 8px;
   border-radius: 999px;
-  background: var(--panel);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   color: var(--dim);
+  transition: all 150ms ease;
 }
 
 .perception-source-chip.online {
-  color: var(--green);
-  background: rgba(111, 209, 125, 0.1);
+  color: #35e0a0;
+  background: rgba(53, 224, 160, 0.08);
+  border-color: rgba(53, 224, 160, 0.2);
 }
 
 .perception-source-chip.offline {
-  opacity: 0.45;
+  opacity: 0.4;
 }
+
+/* ── Perception Dynamic Grid & Layouts ───────────────────────────────────── */
 
 .perception-grid {
   flex: 1;
   min-height: 0;
   overflow: auto;
   display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-  grid-template-rows: repeat(3, minmax(0, 1fr));
-  gap: 18px;
-  padding: 4px 20px 20px;
+  gap: 16px;
+  padding: 16px 20px 20px;
+  transition: all 250ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .perception-grid[hidden] {
   display: none !important;
 }
 
+/* Layout Split (Default) */
+.perception-grid.layout-split {
+  grid-template-columns: minmax(0, 3.2fr) minmax(0, 2fr);
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+}
+
+/* Layout Grid 2x2 */
+.perception-grid.layout-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  grid-template-rows: repeat(2, minmax(0, 1fr)) !important;
+}
+
+/* Layout Focus (Maximized tile) */
+.perception-grid.layout-focus {
+  grid-template-columns: 1fr !important;
+  grid-template-rows: 1fr !important;
+}
+
+.perception-grid.layout-focus .perception-tile:not(.is-focused) {
+  display: none !important;
+}
+
+.perception-grid.layout-focus .perception-tile.is-focused {
+  grid-column: 1 / -1 !important;
+  grid-row: 1 / -1 !important;
+}
+
+/* ── Cybernetic Perception Tiles ─────────────────────────────────────────── */
+
 .perception-tile {
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  background: var(--panel);
-  border: 1px solid rgba(255, 255, 255, 0.045);
+  background: linear-gradient(180deg, rgba(17, 28, 33, 0.85) 0%, rgba(10, 17, 20, 0.96) 100%);
+  border: 1px solid rgba(95, 205, 216, 0.12);
   border-radius: 14px;
   overflow: hidden;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  position: relative;
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.perception-tile:hover {
+  border-color: rgba(95, 205, 216, 0.28);
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.55), 0 0 20px rgba(95, 205, 216, 0.06);
 }
 
 .perception-tile[hidden] {
@@ -4052,86 +4213,236 @@ select:focus {
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 8px 14px;
-  padding: 13px 16px 11px;
+  gap: 8px 12px;
+  padding: 10px 14px;
+  background: rgba(12, 22, 26, 0.6);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.tile-title-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tile-live-indicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #35e0a0;
+  box-shadow: 0 0 6px #35e0a0;
+  flex-shrink: 0;
+}
+
+.tile-type-icon {
+  stroke: var(--dim);
+  opacity: 0.75;
 }
 
 .perception-tile-header h3 {
   margin: 0;
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.09em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--muted);
+  color: var(--text);
 }
 
 .perception-tile-meta {
-  font-family: ui-monospace, SFMono-Regular, Menlo, "Cascadia Mono", monospace;
-  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
   font-variant-numeric: tabular-nums;
   color: var(--dim);
   white-space: nowrap;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.perception-tile-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tile-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: var(--dim);
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.tile-tool-btn:hover {
+  background: rgba(95, 205, 216, 0.15);
+  border-color: rgba(95, 205, 216, 0.35);
+  color: #5ad1e6;
+}
+
+.perception-tile.is-focused .focus-expand-icon {
+  display: none !important;
+}
+
+.perception-tile.is-focused .focus-collapse-icon {
+  display: inline-block !important;
 }
 
 .perception-tile-actions {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   min-width: 0;
 }
 
 .perception-layers {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 6px;
 }
 
-.perception-layer {
+.perception-layer-pill {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  font-size: 11px;
+  gap: 4px;
+  font-size: 10.5px;
+  font-family: ui-monospace, monospace;
   color: var(--dim);
   cursor: pointer;
-  white-space: nowrap;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   user-select: none;
-  transition: color 120ms ease;
+  transition: all 120ms ease;
 }
 
-.perception-layer:hover {
-  color: var(--muted);
+.perception-layer-pill:hover {
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.15);
 }
 
-.perception-layer input {
+.perception-layer-pill:has(input:checked) {
+  background: rgba(95, 205, 216, 0.12);
+  border-color: rgba(95, 205, 216, 0.3);
+  color: #5ad1e6;
+}
+
+.perception-layer-pill.laser-layer-pill:has(input:checked) {
+  background: rgba(53, 224, 160, 0.12);
+  border-color: rgba(53, 224, 160, 0.3);
+  color: #35e0a0;
+}
+
+.perception-layer-pill input {
+  margin: 0;
+  width: 11px;
+  height: 11px;
   accent-color: var(--cyan);
   cursor: pointer;
-  margin: 0;
-  width: 13px;
-  height: 13px;
 }
 
 .perception-view-btn {
   font: inherit;
-  font-size: 11px;
+  font-size: 10.5px;
+  font-family: ui-monospace, monospace;
   color: var(--muted);
-  background: var(--panel-3);
-  border: none;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 999px;
-  padding: 3px 12px;
+  padding: 2px 9px;
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
+  transition: all 120ms ease;
 }
 
 .perception-view-btn:hover {
   color: var(--text);
   background: #1e323a;
+  border-color: rgba(95, 205, 216, 0.3);
 }
+
+.colormap-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-family: ui-monospace, monospace;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--dim);
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.colormap-toggle-btn:hover {
+  border-color: rgba(95, 205, 216, 0.3);
+  color: var(--text);
+}
+
+.colormap-toggle-btn.active {
+  background: rgba(95, 205, 216, 0.12);
+  border-color: rgba(95, 205, 216, 0.35);
+  color: #5ad1e6;
+}
+
+.colormap-preview {
+  width: 14px;
+  height: 8px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #30123b, #28bbec, #a2fc3c, #fb8022, #7a0403);
+}
+
+/* ── HUD Corner Brackets ─────────────────────────────────────────────────── */
+
+.hud-bracket {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  pointer-events: none;
+  z-index: 5;
+  border-color: rgba(95, 205, 216, 0.32);
+  border-style: solid;
+}
+
+.hud-bracket.top-left {
+  top: 8px;
+  left: 8px;
+  border-width: 1.5px 0 0 1.5px;
+}
+
+.hud-bracket.top-right {
+  top: 8px;
+  right: 8px;
+  border-width: 1.5px 1.5px 0 0;
+}
+
+.hud-bracket.bottom-left {
+  bottom: 8px;
+  left: 8px;
+  border-width: 0 0 1.5px 1.5px;
+}
+
+.hud-bracket.bottom-right {
+  bottom: 8px;
+  right: 8px;
+  border-width: 0 1.5px 1.5px 0;
+}
+
+/* ── Bodies & Canvases ──────────────────────────────────────────────────── */
 
 .perception-tile-body {
   flex: 1;
   min-height: 0;
   position: relative;
-  background: #0b1618;
+  background: #091316;
 }
 
 .perception-camera-body {
@@ -4142,106 +4453,127 @@ select:focus {
   overflow: hidden;
 }
 
+.perception-camera-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  position: relative;
+  z-index: 2;
+}
+
+.perception-camera-img:not(.loaded) {
+  opacity: 0;
+}
+
 .perception-tile-placeholder {
   position: absolute;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: radial-gradient(circle at center, rgba(16, 26, 31, 0.4) 0%, #0b1618 100%);
+  background: radial-gradient(circle at center, rgba(14, 28, 34, 0.95) 0%, rgba(9, 19, 22, 0.98) 100%);
+  z-index: 3;
   pointer-events: none;
-  z-index: 1;
-  transition: opacity 200ms ease;
+  transition: opacity 0.2s ease, visibility 0.2s ease;
 }
 
-.perception-tile-placeholder.has-feed {
-  opacity: 0;
-  visibility: hidden;
+.perception-tile-placeholder.has-feed,
+.perception-tile-placeholder[hidden] {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
 }
 
 .perception-placeholder-content {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  position: relative;
-  z-index: 2;
+  gap: 10px;
+  text-align: center;
+  padding: 16px;
 }
 
 .perception-placeholder-crosshair {
-  position: absolute;
-  width: 90px;
-  height: 90px;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  pointer-events: none;
+  width: 20px;
+  height: 20px;
+  position: relative;
+  opacity: 0.4;
 }
 
 .perception-placeholder-crosshair::before,
 .perception-placeholder-crosshair::after {
   content: "";
   position: absolute;
-  background: rgba(95, 205, 216, 0.12);
+  background: #5ad1e6;
 }
 
 .perception-placeholder-crosshair::before {
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  width: 1px;
+  top: 9px;
+  left: 0;
+  right: 0;
+  height: 2px;
 }
 
 .perception-placeholder-crosshair::after {
-  left: 0;
-  right: 0;
-  top: 50%;
-  height: 1px;
+  left: 9px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
 }
 
 .perception-placeholder-icon {
-  width: 32px;
-  height: 32px;
-  stroke: var(--dim);
-  opacity: 0.65;
-  transition: stroke 150ms ease;
+  color: rgba(95, 205, 216, 0.4);
+  filter: drop-shadow(0 0 8px rgba(95, 205, 216, 0.15));
 }
 
 .perception-placeholder-badge {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 4px;
   font-size: 10px;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  padding: 2px 8px;
-  border-radius: 4px;
-  background: rgba(241, 186, 79, 0.12);
-  color: var(--amber);
-  border: 1px solid rgba(241, 186, 79, 0.25);
+  background: rgba(95, 205, 216, 0.08);
+  color: #5ad1e6;
+  border: 1px solid rgba(95, 205, 216, 0.25);
 }
 
 .perception-placeholder-hint {
   font-size: 11px;
-  color: var(--dim);
+  color: #607983;
+  font-family: ui-monospace, SFMono-Regular, monospace;
 }
 
-.perception-camera-img {
+.perception-depth-body {
+  cursor: crosshair;
+}
+
+.depth-hover-tooltip {
+  position: absolute;
+  z-index: 10;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(11, 22, 26, 0.9);
+  border: 1px solid rgba(95, 205, 216, 0.35);
+  color: #5ad1e6;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  pointer-events: none;
+  backdrop-filter: blur(6px);
+  transform: translate(12px, -50%);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.perception-depth-canvas {
   width: 100%;
   height: 100%;
   object-fit: contain;
-  opacity: 0;
-  transition: opacity 250ms ease;
+  display: block;
   z-index: 2;
   position: relative;
-}
-
-.perception-camera-img:not([src]),
-.perception-camera-img[src=""] {
-  display: none !important;
-}
-
-.perception-camera-img.loaded {
-  opacity: 1;
 }
 
 .perception-canvas-body {
@@ -4255,9 +4587,49 @@ select:focus {
   display: block;
 }
 
-.perception-canvas[data-scene-canvas] {
+.perception-canvas[data-scene-canvas],
+.perception-canvas[data-lidar-canvas] {
   cursor: grab;
   touch-action: none;
+}
+
+.perception-canvas[data-lidar-canvas]:active,
+.perception-canvas[data-scene-canvas]:active {
+  cursor: grabbing;
+}
+
+.scene-compass {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 6;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(11, 22, 26, 0.75);
+  border: 1px solid rgba(95, 205, 216, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+  pointer-events: none;
+}
+
+.compass-n {
+  position: absolute;
+  top: 2px;
+  font-size: 8px;
+  font-weight: 700;
+  color: #f2726f;
+  font-family: ui-monospace, monospace;
+}
+
+.compass-needle {
+  width: 2px;
+  height: 14px;
+  background: linear-gradient(180deg, #f2726f 50%, #5ad1e6 50%);
+  border-radius: 1px;
+  transition: transform 200ms ease;
 }
 
 /* ── Cybernetic Standby Hub (Global Empty State) ─────────────────────── */
@@ -4270,6 +4642,10 @@ select:focus {
   justify-content: center;
   padding: 24px 20px;
   overflow-y: auto;
+}
+
+.perception-empty[hidden] {
+  display: none !important;
 }
 
 .perception-empty-card {

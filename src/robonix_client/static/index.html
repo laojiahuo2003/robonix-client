@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Robonix Client</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260918b" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260919c" />
   </head>
   <body>
     <div class="app-shell">
@@ -154,19 +154,59 @@
         <section class="page perception-page" data-page-panel="perception" aria-labelledby="perceptionTitle">
           <div class="perception-shell">
             <header class="perception-header">
-              <div class="perception-title-line">
-                <span class="perception-eyebrow" data-i18n="Live Sensor Data">Live Sensor Data</span>
-                <h2 id="perceptionTitle" data-i18n="Perception">Perception</h2>
+              <div class="perception-title-group">
+                <div class="perception-title-line">
+                  <span class="perception-eyebrow" data-i18n="Live Sensor Data">Live Sensor Data</span>
+                  <h2 id="perceptionTitle" data-i18n="Perception">Perception</h2>
+                </div>
+                <div class="perception-health-pill" id="perceptionHealthBadge">
+                  <span class="pulse-dot"></span>
+                  <span id="perceptionHealthText" data-i18n="Telemetry Active">Telemetry Active</span>
+                </div>
               </div>
-              <div class="perception-source-strip" id="perceptionSourceStrip" data-i18n-aria-label="Data source status" aria-label="Data source status"></div>
+              <div class="perception-toolbar">
+                <div class="perception-layout-switcher" role="group" aria-label="Layout">
+                  <button type="button" class="layout-btn active" data-layout-mode="split" title="Split Layout (Map + Sensors)" data-i18n-title="Split Layout (Map + Sensors)">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="10" height="18" rx="2"/><rect x="15" y="3" width="6" height="5" rx="1"/><rect x="15" y="10" width="6" height="5" rx="1"/><rect x="15" y="17" width="6" height="4" rx="1"/></svg>
+                    <span data-i18n="Split">Split</span>
+                  </button>
+                  <button type="button" class="layout-btn" data-layout-mode="grid" title="2x2 Grid Layout" data-i18n-title="2x2 Grid Layout">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg>
+                    <span data-i18n="Grid">Grid</span>
+                  </button>
+                </div>
+                <button type="button" class="perception-control-btn" id="perceptionPauseBtn" title="Pause / Resume stream" data-i18n-title="Pause / Resume stream">
+                  <svg class="pause-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                  <svg class="play-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                  <span data-i18n="Live">Live</span>
+                </button>
+                <div class="perception-source-strip" id="perceptionSourceStrip" data-i18n-aria-label="Data source status" aria-label="Data source status"></div>
+              </div>
             </header>
             <div class="perception-grid" id="perceptionGrid">
               <section class="perception-tile" data-tile="camera">
                 <header class="perception-tile-header">
-                  <h3 data-i18n="Camera">Camera</h3>
-                  <span class="perception-tile-meta" data-tile-meta></span>
+                  <div class="tile-title-group">
+                    <span class="tile-live-indicator"></span>
+                    <svg class="tile-type-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                    <h3 data-i18n="Camera">Camera</h3>
+                  </div>
+                  <div class="perception-tile-tools">
+                    <span class="perception-tile-meta" data-tile-meta></span>
+                    <button type="button" class="tile-tool-btn" data-action="snapshot" title="Save Snapshot" data-i18n-title="Save Snapshot">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    </button>
+                    <button type="button" class="tile-tool-btn" data-action="focus" title="Maximize Tile" data-i18n-title="Maximize Tile">
+                      <svg class="focus-expand-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+                      <svg class="focus-collapse-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="10" y1="14" x2="3" y2="21"/></svg>
+                    </button>
+                  </div>
                 </header>
                 <div class="perception-tile-body perception-camera-body">
+                  <div class="hud-bracket top-left"></div>
+                  <div class="hud-bracket top-right"></div>
+                  <div class="hud-bracket bottom-left"></div>
+                  <div class="hud-bracket bottom-right"></div>
                   <div class="perception-tile-placeholder" data-tile-placeholder="camera">
                     <div class="perception-placeholder-content">
                       <div class="perception-placeholder-crosshair"></div>
@@ -183,10 +223,32 @@
               </section>
               <section class="perception-tile" data-tile="depth">
                 <header class="perception-tile-header">
-                  <h3 data-i18n="Depth Camera">Depth Camera</h3>
-                  <span class="perception-tile-meta" data-tile-meta></span>
+                  <div class="tile-title-group">
+                    <span class="tile-live-indicator"></span>
+                    <svg class="tile-type-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5" stroke-dasharray="3 3"/></svg>
+                    <h3 data-i18n="Depth Camera">Depth Camera</h3>
+                  </div>
+                  <div class="perception-tile-tools">
+                    <button type="button" class="colormap-toggle-btn active" id="depthColormapBtn" title="Toggle Turbo Colormap" data-i18n-title="Toggle Turbo Colormap">
+                      <span class="colormap-preview"></span>
+                      <span data-i18n="Heatmap">Heatmap</span>
+                    </button>
+                    <span class="perception-tile-meta" data-tile-meta></span>
+                    <button type="button" class="tile-tool-btn" data-action="snapshot" title="Save Snapshot" data-i18n-title="Save Snapshot">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    </button>
+                    <button type="button" class="tile-tool-btn" data-action="focus" title="Maximize Tile" data-i18n-title="Maximize Tile">
+                      <svg class="focus-expand-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+                      <svg class="focus-collapse-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="10" y1="14" x2="3" y2="21"/></svg>
+                    </button>
+                  </div>
                 </header>
-                <div class="perception-tile-body perception-camera-body">
+                <div class="perception-tile-body perception-camera-body perception-depth-body">
+                  <div class="hud-bracket top-left"></div>
+                  <div class="hud-bracket top-right"></div>
+                  <div class="hud-bracket bottom-left"></div>
+                  <div class="hud-bracket bottom-right"></div>
+                  <div class="depth-hover-tooltip" id="depthHoverTooltip" hidden></div>
                   <div class="perception-tile-placeholder" data-tile-placeholder="depth">
                     <div class="perception-placeholder-content">
                       <div class="perception-placeholder-crosshair"></div>
@@ -199,36 +261,77 @@
                       <span class="perception-placeholder-hint" data-i18n="Awaiting depth feed...">Awaiting depth feed...</span>
                     </div>
                   </div>
-                  <img class="perception-camera-img" data-depth-img alt="Depth camera" data-i18n-alt="Depth Camera" draggable="false" />
+                  <canvas class="perception-depth-canvas" data-depth-canvas></canvas>
+                  <img class="perception-camera-img" data-depth-img alt="Depth camera" data-i18n-alt="Depth Camera" draggable="false" style="display:none;" />
                 </div>
               </section>
               <section class="perception-tile" data-tile="lidar">
                 <header class="perception-tile-header">
-                  <h3 data-i18n="LiDAR">LiDAR</h3>
-                  <span class="perception-tile-meta" data-tile-meta></span>
+                  <div class="tile-title-group">
+                    <span class="tile-live-indicator"></span>
+                    <svg class="tile-type-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m12 2 3 7h-6z"/><circle cx="12" cy="12" r="2"/></svg>
+                    <h3 data-i18n="LiDAR">LiDAR</h3>
+                  </div>
+                  <div class="perception-tile-tools">
+                    <span class="perception-tile-meta" data-tile-meta></span>
+                    <button type="button" class="tile-tool-btn" data-action="reset-lidar" title="Reset Range & Zoom" data-i18n-title="Reset Range & Zoom">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                    </button>
+                    <button type="button" class="tile-tool-btn" data-action="snapshot" title="Save Snapshot" data-i18n-title="Save Snapshot">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    </button>
+                    <button type="button" class="tile-tool-btn" data-action="focus" title="Maximize Tile" data-i18n-title="Maximize Tile">
+                      <svg class="focus-expand-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+                      <svg class="focus-collapse-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="10" y1="14" x2="3" y2="21"/></svg>
+                    </button>
+                  </div>
                 </header>
                 <div class="perception-tile-body perception-canvas-body">
+                  <div class="hud-bracket top-left"></div>
+                  <div class="hud-bracket top-right"></div>
+                  <div class="hud-bracket bottom-left"></div>
+                  <div class="hud-bracket bottom-right"></div>
                   <canvas class="perception-canvas" data-lidar-canvas></canvas>
                 </div>
               </section>
               <section class="perception-tile perception-tile-wide" data-tile="scene">
                 <header class="perception-tile-header">
-                  <h3 data-i18n="Scene Map">Scene Map</h3>
+                  <div class="tile-title-group">
+                    <span class="tile-live-indicator"></span>
+                    <svg class="tile-type-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
+                    <h3 data-i18n="Scene Map">Scene Map</h3>
+                  </div>
                   <div class="perception-tile-actions">
                     <div class="perception-layers" role="group" data-i18n-aria-label="Map view" aria-label="Map view">
-                      <button class="perception-view-btn" type="button" data-scene-view="fit" data-i18n="fit">fit</button>
-                      <label class="perception-layer"><input type="checkbox" data-scene-view="follow" /><span data-i18n="follow">follow</span></label>
+                      <button class="perception-view-btn" type="button" data-scene-view="fit" data-i18n="fit" title="Fit to Viewport" data-i18n-title="Fit to Viewport">fit</button>
+                      <label class="perception-layer-pill" title="Track Robot Center" data-i18n-title="Track Robot Center"><input type="checkbox" data-scene-view="follow" /><span data-i18n="follow">follow</span></label>
                     </div>
                     <div class="perception-layers" role="group" data-i18n-aria-label="Map layers" aria-label="Map layers">
-                      <label class="perception-layer"><input type="checkbox" data-scene-layer="map" checked /><span data-i18n="map">map</span></label>
-                      <label class="perception-layer"><input type="checkbox" data-scene-layer="regions" checked /><span data-i18n="regions">regions</span></label>
-                      <label class="perception-layer"><input type="checkbox" data-scene-layer="objects" checked /><span data-i18n="objects">objects</span></label>
-                      <label class="perception-layer"><input type="checkbox" data-scene-layer="robot" checked /><span data-i18n="robot">robot</span></label>
+                      <label class="perception-layer-pill"><input type="checkbox" data-scene-layer="map" checked /><span data-i18n="map">map</span></label>
+                      <label class="perception-layer-pill"><input type="checkbox" data-scene-layer="regions" checked /><span data-i18n="regions">regions</span></label>
+                      <label class="perception-layer-pill"><input type="checkbox" data-scene-layer="objects" checked /><span data-i18n="objects">objects</span></label>
+                      <label class="perception-layer-pill"><input type="checkbox" data-scene-layer="robot" checked /><span data-i18n="robot">robot</span></label>
+                      <label class="perception-layer-pill laser-layer-pill"><input type="checkbox" data-scene-layer="lidar" checked /><span data-i18n="laser">laser</span></label>
                     </div>
                     <span class="perception-tile-meta" data-tile-meta></span>
+                    <button type="button" class="tile-tool-btn" data-action="snapshot" title="Save Snapshot" data-i18n-title="Save Snapshot">
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    </button>
+                    <button type="button" class="tile-tool-btn" data-action="focus" title="Maximize Tile" data-i18n-title="Maximize Tile">
+                      <svg class="focus-expand-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+                      <svg class="focus-collapse-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="10" y1="14" x2="3" y2="21"/></svg>
+                    </button>
                   </div>
                 </header>
                 <div class="perception-tile-body perception-canvas-body">
+                  <div class="hud-bracket top-left"></div>
+                  <div class="hud-bracket top-right"></div>
+                  <div class="hud-bracket bottom-left"></div>
+                  <div class="hud-bracket bottom-right"></div>
+                  <div class="scene-compass" title="Map North (+Y)" data-i18n-title="Map North (+Y)">
+                    <span class="compass-n">N</span>
+                    <span class="compass-needle"></span>
+                  </div>
                   <canvas class="perception-canvas" data-scene-canvas></canvas>
                 </div>
               </section>
@@ -665,8 +768,8 @@
       </section>
     </div>
 
-    <script src="/static/i18n.js?v=20260918b"></script>
-    <script src="/static/app.js?v=20260918b"></script>
-    <script src="/static/vitals.bundle.js?v=20260918b"></script>
+    <script src="/static/i18n.js?v=20260919c"></script>
+    <script src="/static/app.js?v=20260919c"></script>
+    <script src="/static/vitals.bundle.js?v=20260919c"></script>
   </body>
 </html>
