@@ -15,6 +15,7 @@
     // Navigation and shell
     "Workspace": "工作区",
     "Chat": "对话",
+    "Perception": "感知",
     "Vitals": "健康",
     "Audio": "音频",
     "Settings": "设置",
@@ -456,6 +457,30 @@
     "canceled": "已取消",
     "aborted": "已中止",
     "degraded": "降级",
+
+    // Perception page
+    "Live Sensor Data": "实时传感器数据",
+    "Camera": "摄像头",
+    "Depth Camera": "深度相机",
+    "LiDAR": "激光雷达",
+    "Scene Map": "场景地图",
+    "Map layers": "地图图层",
+    "map": "地图",
+    "regions": "区域",
+    "objects": "物体",
+    "robot": "机器人",
+    "Loading...": "加载中…",
+    "Offline": "离线",
+    "Error: {error}": "错误：{error}",
+    "Last updated: {time}": "更新于：{time}",
+    "No image data": "无图像数据",
+    "Sensor offline": "传感器离线",
+    "Failed to load image": "图像加载失败",
+    "Camera feed unavailable": "摄像头源不可用",
+    "Depth data unavailable": "深度数据不可用",
+    "LiDAR data unavailable": "激光雷达数据不可用",
+    "Map data unavailable": "地图数据不可用",
+    "Data source status": "数据源状态",
   };
 
   function detectLang() {

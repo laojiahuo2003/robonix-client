@@ -3147,8 +3147,9 @@ const perception = {
   tiles: { camera: false, depth: false, lidar: false, scene: false },
   resources: {},
   sceneLayers: { map: true, regions: true, objects: true, robot: true },
-  lastScene: null,
   lastMap: null,
+  lastLidarScan: null,
+  lastScene: null,
   mapAvailable: false,
   mapImage: null,
 };
@@ -3180,8 +3181,23 @@ function perceptionSetAvailable(id, available) {
 
 function fitCanvas(canvas) {
   const dpr = window.devicePixelRatio || 1;
-  const w = Math.max(1, canvas.clientWidth || 480);
-  const h = Math.max(1, canvas.clientHeight || 480);
+  const parent = canvas.parentElement;
+  let w = canvas.clientWidth;
+  let h = canvas.clientHeight;
+
+  // If canvas dimensions are not computed yet (layout not ready), use parent dimensions
+  if (!w || !h) {
+    if (parent) {
+      w = parent.clientWidth || 480;
+      h = parent.clientHeight || 480;
+    } else {
+      w = 480;
+      h = 480;
+    }
+  }
+
+  w = Math.max(1, w);
+  h = Math.max(1, h);
   const pw = Math.round(w * dpr);
   const ph = Math.round(h * dpr);
   if (canvas.width !== pw || canvas.height !== ph) {
@@ -3247,7 +3263,7 @@ async function perceptionPollImage(id, endpoint) {
   try {
     const data = await perceptionFetch(endpoint);
     if (!data.ok || !data.image || !data.image.data) {
-      perceptionMeta(id, data.error || "no frame");
+      perceptionMeta(id, data.error || t("No image data"));
       return;
     }
     const src = `data:image/${data.image.encoding || "jpeg"};base64,${data.image.data}`;
@@ -3255,7 +3271,7 @@ async function perceptionPollImage(id, endpoint) {
     const ms = Math.round(performance.now() - started);
     perceptionMeta(id, `${data.image.width}×${data.image.height} · ${ms}ms`);
   } catch (_) {
-    perceptionMeta(id, "offline");
+    perceptionMeta(id, t("Offline"));
   }
 }
 
@@ -3522,13 +3538,16 @@ async function perceptionPollLidar() {
   try {
     const data = await perceptionFetch("lidar");
     if (!data.ok || !data.scan) {
-      perceptionMeta("lidar", data.error || "no scan");
+      perceptionMeta("lidar", data.error || t("LiDAR data unavailable"));
+      perception.lastLidarScan = null;
       return;
     }
+    perception.lastLidarScan = data.scan;
     drawLidar(canvas, data.scan);
     perceptionMeta("lidar", `${(data.scan.ranges || []).length} rays`);
   } catch (_) {
-    perceptionMeta("lidar", "offline");
+    perceptionMeta("lidar", t("Offline"));
+    perception.lastLidarScan = null;
   }
 }
 
@@ -3539,11 +3558,13 @@ async function perceptionPollScene() {
   try {
     data = await perceptionFetch("scene");
   } catch (_) {
-    perceptionMeta("scene", "offline");
+    perceptionMeta("scene", t("Offline"));
+    perception.lastScene = null;
     return;
   }
   if (!data.ok || !data.scene) {
-    perceptionMeta("scene", data.error || "no scene");
+    perceptionMeta("scene", data.error || t("Map data unavailable"));
+    perception.lastScene = null;
     return;
   }
   perception.lastScene = data.scene;
@@ -3644,6 +3665,19 @@ function stopPerception() {
   perception.timers.clear();
 }
 
+function redrawPerceptionCanvases() {
+  const lidarCanvas = document.querySelector("[data-lidar-canvas]");
+  const sceneCanvas = document.querySelector("[data-scene-canvas]");
+
+  if (lidarCanvas && perception.lastLidarScan) {
+    drawLidar(lidarCanvas, perception.lastLidarScan);
+  }
+
+  if (sceneCanvas && perception.lastScene) {
+    drawScene(sceneCanvas, perception.lastScene);
+  }
+}
+
 window.addEventListener("robonix:page", (event) => {
   const name = event.detail && event.detail.name;
   if (name === "perception") {
@@ -3651,6 +3685,17 @@ window.addEventListener("robonix:page", (event) => {
   } else {
     stopPerception();
   }
+});
+
+// Redraw canvases when window is resized
+let resizeTimeout;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimeout);
+  resizeTimeout = setTimeout(() => {
+    if (perception.polling) {
+      redrawPerceptionCanvases();
+    }
+  }, 150);
 });
 
 /// Re-render every dynamic region after a language switch. Static markup is

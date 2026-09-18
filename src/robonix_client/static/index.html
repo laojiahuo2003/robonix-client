@@ -155,15 +155,15 @@
           <div class="perception-shell">
             <header class="perception-header">
               <div class="perception-title-line">
-                <span class="perception-eyebrow">Live sensors</span>
-                <h2 id="perceptionTitle">Perception</h2>
+                <span class="perception-eyebrow" data-i18n="Live Sensor Data">Live Sensor Data</span>
+                <h2 id="perceptionTitle" data-i18n="Perception">Perception</h2>
               </div>
-              <div class="perception-source-strip" id="perceptionSourceStrip" aria-label="Data source status"></div>
+              <div class="perception-source-strip" id="perceptionSourceStrip" data-i18n-aria-label="Data source status" aria-label="Data source status"></div>
             </header>
             <div class="perception-grid" id="perceptionGrid">
               <section class="perception-tile" data-tile="camera">
                 <header class="perception-tile-header">
-                  <h3>Camera</h3>
+                  <h3 data-i18n="Camera">Camera</h3>
                   <span class="perception-tile-meta" data-tile-meta></span>
                 </header>
                 <div class="perception-tile-body perception-camera-body">
@@ -172,7 +172,7 @@
               </section>
               <section class="perception-tile" data-tile="depth">
                 <header class="perception-tile-header">
-                  <h3>Depth</h3>
+                  <h3 data-i18n="Depth Camera">Depth Camera</h3>
                   <span class="perception-tile-meta" data-tile-meta></span>
                 </header>
                 <div class="perception-tile-body perception-camera-body">
@@ -181,7 +181,7 @@
               </section>
               <section class="perception-tile" data-tile="lidar">
                 <header class="perception-tile-header">
-                  <h3>Lidar</h3>
+                  <h3 data-i18n="LiDAR">LiDAR</h3>
                   <span class="perception-tile-meta" data-tile-meta></span>
                 </header>
                 <div class="perception-tile-body perception-canvas-body">
@@ -190,13 +190,13 @@
               </section>
               <section class="perception-tile perception-tile-wide" data-tile="scene">
                 <header class="perception-tile-header">
-                  <h3>Scene map</h3>
+                  <h3 data-i18n="Scene Map">Scene Map</h3>
                   <div class="perception-tile-actions">
-                    <div class="perception-layers" role="group" aria-label="Map layers">
-                      <label class="perception-layer"><input type="checkbox" data-scene-layer="map" checked />map</label>
-                      <label class="perception-layer"><input type="checkbox" data-scene-layer="regions" checked />regions</label>
-                      <label class="perception-layer"><input type="checkbox" data-scene-layer="objects" checked />objects</label>
-                      <label class="perception-layer"><input type="checkbox" data-scene-layer="robot" checked />robot</label>
+                    <div class="perception-layers" role="group" data-i18n-aria-label="Map layers" aria-label="Map layers">
+                      <label class="perception-layer"><input type="checkbox" data-scene-layer="map" checked /><span data-i18n="map">map</span></label>
+                      <label class="perception-layer"><input type="checkbox" data-scene-layer="regions" checked /><span data-i18n="regions">regions</span></label>
+                      <label class="perception-layer"><input type="checkbox" data-scene-layer="objects" checked /><span data-i18n="objects">objects</span></label>
+                      <label class="perception-layer"><input type="checkbox" data-scene-layer="robot" checked /><span data-i18n="robot">robot</span></label>
                     </div>
                     <span class="perception-tile-meta" data-tile-meta></span>
                   </div>
