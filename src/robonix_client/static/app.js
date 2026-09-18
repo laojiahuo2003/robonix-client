@@ -285,6 +285,7 @@ async function init() {
   bindSettings();
   bindEvents();
   bindSceneLayers();
+  bindSceneView();
   renderAudioBars();
   renderHistory();
   renderMessages();
@@ -3141,6 +3142,8 @@ function clear(node) {
 // hides them instead of rendering a broken tile.
 // ─────────────────────────────────────────────────────────────────────────────
 
+const PERCEPTION_INTERVAL_MS = 1000;
+
 const perception = {
   polling: false,
   timers: new Set(),
@@ -3152,6 +3155,15 @@ const perception = {
   lastScene: null,
   mapAvailable: false,
   mapImage: null,
+  // Scene map viewport, in the map frame: px-per-metre plus the world point at
+  // the canvas centre. ``auto`` stays true until the operator pans or zooms,
+  // after which the view is theirs and nothing rescales it behind their back.
+  // ``fittedKey`` records what the current fit was computed from so the view can
+  // re-fit once when the occupancy grid turns up, and never again.
+  sceneView: { scale: null, center: null, auto: true, fittedKey: null, follow: false },
+  sceneHit: [],
+  sceneHover: -1,
+  scenePan: null,
 };
 
 function perceptionAtlas() {
@@ -3275,15 +3287,22 @@ async function perceptionPollImage(id, endpoint) {
   }
 }
 
+// A LaserScan's angles run counter-clockwise in a y-up frame (REP-103), while a
+// canvas counts y downwards. The sine term is therefore negated: plotting
+// ``cy + r*sin(a)`` straight onto the canvas mirrors the scan, drawing the
+// robot's left where its right belongs and landing vertical features on the
+// opposite side from where the scene map puts them. With the sign corrected the
+// tile shares the map's axes -- +x right, +y up -- so a return to the robot's
+// left sits above the centre in both views.
 function drawLidar(canvas, scan) {
   const { ctx, w, h } = fitCanvas(canvas);
   const cx = w / 2;
   const cy = h / 2;
   const maxRange = Math.max(1.0, Number(scan.range_max) || 6.0);
-  const scale = (Math.min(w, h) / 2 - 12) / maxRange;
+  const scale = (Math.min(w, h) / 2 - 20) / maxRange;
 
   ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = "#0b1220";
+  ctx.fillStyle = "#0b1618";
   ctx.fillRect(0, 0, w, h);
 
   ctx.strokeStyle = "rgba(120,140,180,0.15)";
@@ -3303,13 +3322,46 @@ function drawLidar(canvas, scan) {
     const r = Number(ranges[i]);
     if (!Number.isFinite(r) || r < rangeMin || r > maxRange) continue;
     const a = angleMin + i * angleInc;
-    ctx.fillRect(cx + r * Math.cos(a) * scale, cy + r * Math.sin(a) * scale, 2, 2);
+    ctx.fillRect(cx + r * Math.cos(a) * scale, cy - r * Math.sin(a) * scale, 2, 2);
   }
+
+  drawLidarHeading(ctx, w, h, cx, cy, maxRange * scale, scan.header && scan.header.frame_id);
 
   ctx.fillStyle = "#ffd166";
   ctx.beginPath();
-  ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+  ctx.arc(cx, cy, 3.5, 0, Math.PI * 2);
   ctx.fill();
+}
+
+// The scan is robot-centric, so its axes travel with the robot rather than
+// sitting in the shared ``map`` frame. Say so on the tile: a bare centre dot
+// leaves the reader to guess which way "forward" points and which frame the
+// angles belong to. Both notes sit in a footer row so they cannot land on top
+// of the scan they describe.
+function drawLidarHeading(ctx, w, h, cx, cy, reach, frameId) {
+  const ink = "rgba(241,186,79,0.85)";
+
+  // a = 0 points along the robot's +x, i.e. to the right on a map-aligned tile
+  ctx.fillStyle = ink;
+  ctx.beginPath();
+  ctx.moveTo(cx + reach + 8, cy);
+  ctx.lineTo(cx + reach + 1, cy - 4);
+  ctx.lineTo(cx + reach + 1, cy + 4);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
+  ctx.textBaseline = "alphabetic";
+
+  if (frameId) {
+    ctx.fillStyle = "rgba(154,169,173,0.75)";
+    ctx.textAlign = "left";
+    ctx.fillText(String(frameId), 8, h - 8);
+  }
+
+  ctx.fillStyle = ink;
+  ctx.textAlign = "right";
+  ctx.fillText("front →", w - 8, h - 8);
 }
 
 function scenePoint(x, y) {
@@ -3361,10 +3413,7 @@ function mapImageFor(occupancy) {
   if (!perception.mapImage || perception.mapImage.src !== src) {
     const img = new Image();
     img.onload = () => {
-      if (perception.mapImage && perception.mapImage.src === src) {
-        const canvas = document.querySelector("[data-scene-canvas]");
-        if (canvas && perception.lastScene) drawScene(canvas, perception.lastScene);
-      }
+      if (perception.mapImage && perception.mapImage.src === src) redrawScene();
     };
     img.src = `data:image/png;base64,${src}`;
     perception.mapImage = { src, img };
@@ -3373,10 +3422,110 @@ function mapImageFor(occupancy) {
   return cached.img.complete && cached.img.naturalWidth ? cached.img : null;
 }
 
+function boundsFrom(minX, minY, maxX, maxY) {
+  return {
+    cx: (minX + maxX) / 2,
+    cy: (minY + maxY) / 2,
+    spanX: Math.max(0.6, maxX - minX),
+    spanY: Math.max(0.6, maxY - minY),
+  };
+}
+
+function sceneBounds(points) {
+  if (!points.length) return null;
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y);
+  return boundsFrom(Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys));
+}
+
+// Extent of the occupancy grid in the map frame, or null when it is unusable.
+function sceneMapRect(baseMap) {
+  if (!baseMap) return null;
+  const mx = Number(baseMap.origin_x);
+  const my = Number(baseMap.origin_y);
+  const mw = Number(baseMap.width) * Number(baseMap.resolution);
+  const mh = Number(baseMap.height) * Number(baseMap.resolution);
+  if (![mx, my, mw, mh].every(Number.isFinite) || mw <= 0 || mh <= 0) return null;
+  return { ...boundsFrom(mx, my, mx + mw, my + mh), minX: mx, minY: my, maxX: mx + mw, maxY: my + mh };
+}
+
+function sceneFitTo(view, w, h, bounds) {
+  view.scale = Math.min((w - 56) / bounds.spanX, (h - 56) / bounds.spanY);
+  view.center = { x: bounds.cx, y: bounds.cy };
+}
+
+function drawScaleBar(ctx, w, h, scale) {
+  // Longest round number of metres that still fits in ~15% of the width.
+  const target = (w * 0.15) / scale;
+  const decade = Math.pow(10, Math.floor(Math.log10(target)));
+  const metres = [1, 2, 5, 10].map((m) => m * decade).find((v) => v >= target) || decade * 10;
+  const px = metres * scale;
+  const x0 = 12;
+  const y0 = h - 12;
+  ctx.strokeStyle = "rgba(223,230,245,0.7)";
+  ctx.fillStyle = "rgba(223,230,245,0.7)";
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(x0, y0 - 4);
+  ctx.lineTo(x0, y0 + 4);
+  ctx.moveTo(x0, y0);
+  ctx.lineTo(x0 + px, y0);
+  ctx.moveTo(x0 + px, y0 - 4);
+  ctx.lineTo(x0 + px, y0 + 4);
+  ctx.stroke();
+  ctx.font = "11px system-ui";
+  ctx.textAlign = "left";
+  ctx.fillText(`${metres} m`, x0, y0 - 8);
+}
+
+// Object labels, largest box first, skipping any that would land on a label
+// already placed. A dense scene then reads as a map instead of a wall of text;
+// whatever gets skipped is still reachable by hovering it (which always wins).
+function drawObjectLabels(ctx, candidates) {
+  ctx.font = "11px system-ui";
+  ctx.textAlign = "center";
+  const placed = [];
+  const visible = new Array(candidates.length).fill(false);
+  const order = candidates.map((_c, i) => i).sort((a, b) => {
+    const ca = candidates[a];
+    const cb = candidates[b];
+    if (ca.force !== cb.force) return ca.force ? -1 : 1;
+    return cb.area - ca.area;
+  });
+  // Zooming out makes every box small; without a cap a crowded floor plan still
+  // ends up wall-to-wall text. The biggest few carry the scene at that zoom.
+  let budget = 12;
+  for (const i of order) {
+    const c = candidates[i];
+    if (!c.force) {
+      if (c.minExtent < 26) continue;
+      if (budget <= 0) continue;
+    }
+    const half = ctx.measureText(c.text).width / 2 + 2;
+    const box = { x0: c.x - half, x1: c.x + half, y0: c.y - 10, y1: c.y + 3 };
+    if (!c.force && placed.some((p) => box.x0 < p.x1 && box.x1 > p.x0 && box.y0 < p.y1 && box.y1 > p.y0)) {
+      continue;
+    }
+    placed.push(box);
+    visible[i] = true;
+    if (!c.force) budget -= 1;
+  }
+  candidates.forEach((c, i) => {
+    if (!visible[i]) return;
+    ctx.fillStyle = c.force ? "#ffffff" : "#dfe6f5";
+    ctx.fillText(c.text, c.x, c.y);
+  });
+}
+
+function redrawScene() {
+  const canvas = document.querySelector("[data-scene-canvas]");
+  if (canvas && perception.lastScene) drawScene(canvas, perception.lastScene);
+}
+
 function drawScene(canvas, scene) {
   const { ctx, w, h } = fitCanvas(canvas);
   ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = "#0b1220";
+  ctx.fillStyle = "#0b1618";
   ctx.fillRect(0, 0, w, h);
 
   const objects = (scene.objects && scene.objects.objects) || [];
@@ -3384,8 +3533,8 @@ function drawScene(canvas, scene) {
   const polys = regionPolygons(scene.regions);
   const layers = perception.sceneLayers || {};
   const baseMap = layers.map !== false ? perception.lastMap : null;
+  const mapRect = sceneMapRect(baseMap);
 
-  // Bounds come from *all* data so toggling a layer never rescales the map.
   const pts = [];
   for (const o of objects) {
     const p = scenePoint(o.x, o.y);
@@ -3395,22 +3544,14 @@ function drawScene(canvas, scene) {
   if (rp) pts.push(rp);
   for (const poly of polys) pts.push(...poly.poly);
 
-  // The occupancy base map (when present) carries the fixed world extent; its
-  // corners join the bounds so the overlays always land on the same grid. They
-  // are added as points rather than replacing the scene bounds, so a robot
-  // that has driven outside the mapped area is still visible instead of
-  // clipped at the grid edge.
-  if (baseMap) {
-    const mx = Number(baseMap.origin_x);
-    const my = Number(baseMap.origin_y);
-    const mw = Number(baseMap.width) * Number(baseMap.resolution);
-    const mh = Number(baseMap.height) * Number(baseMap.resolution);
-    if ([mx, my, mw, mh].every(Number.isFinite)) {
-      pts.push({ x: mx, y: my }, { x: mx + mw, y: my }, { x: mx, y: my + mh }, { x: mx + mw, y: my + mh });
-    }
-  }
-
-  if (!pts.length) {
+  const view = perception.sceneView;
+  perception.sceneHit = [];
+  // Fit target: the occupancy grid when there is one, because unlike the object
+  // cloud its extent never moves. Deployments without a map service fall back to
+  // the bounds of whatever data they do have.
+  const fitKey = mapRect ? "map" : "data";
+  const fitBase = mapRect || sceneBounds(pts);
+  if (!fitBase) {
     ctx.fillStyle = "#8892b0";
     ctx.font = "14px system-ui";
     ctx.textAlign = "center";
@@ -3418,29 +3559,36 @@ function drawScene(canvas, scene) {
     return;
   }
 
-  const xs = pts.map((p) => p.x);
-  const ys = pts.map((p) => p.y);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
-  const spanX = Math.max(0.6, maxX - minX);
-  const spanY = Math.max(0.6, maxY - minY);
-  const scale = Math.min((w - 56) / spanX, (h - 56) / spanY);
-  const toX = (x) => w / 2 + (x - (minX + maxX) / 2) * scale;
-  const toY = (y) => h / 2 - (y - (minY + maxY) / 2) * scale;
+  // Fit once, and once more only if the grid turns up after the first scene poll
+  // (it is a better basis than the object cloud). The fit never downgrades, so
+  // unchecking the map layer cannot rescale the view -- and from then on the
+  // basis is fixed, so a new object or a driving robot cannot either.
+  const needsFit = view.fittedKey === null || (fitKey === "map" && view.fittedKey !== "map");
+  if (view.auto && needsFit) {
+    sceneFitTo(view, w, h, fitBase);
+    view.fittedKey = fitKey;
+  }
+  if (view.scale == null || view.center == null) sceneFitTo(view, w, h, fitBase);
+  if (view.follow && rp) view.center = { x: rp.x, y: rp.y };
+
+  const scale = view.scale;
+  const center = view.center;
+  const toX = (x) => w / 2 + (x - center.x) * scale;
+  const toY = (y) => h / 2 - (y - center.y) * scale;
 
   // Base map: draw the occupancy PNG under every overlay, aligned to the same
   // "map" frame via origin/resolution. The image's row 0 is the highest y, so
   // its canvas top edge is toY(origin_y + height * resolution).
-  if (baseMap) {
+  if (baseMap && mapRect) {
     const img = mapImageFor(baseMap);
     if (img) {
-      const mx = Number(baseMap.origin_x);
-      const my = Number(baseMap.origin_y);
-      const mw = Number(baseMap.width) * Number(baseMap.resolution);
-      const mh = Number(baseMap.height) * Number(baseMap.resolution);
-      ctx.drawImage(img, toX(mx), toY(my + mh), mw * scale, mh * scale);
+      ctx.drawImage(
+        img,
+        toX(mapRect.minX),
+        toY(mapRect.maxY),
+        (mapRect.maxX - mapRect.minX) * scale,
+        (mapRect.maxY - mapRect.minY) * scale,
+      );
     }
   }
 
@@ -3486,30 +3634,48 @@ function drawScene(canvas, scene) {
 
   if (layers.objects !== false) {
     const palette = ["#5b8def", "#35e0a0", "#ffd166", "#f2726f", "#c58bf2", "#5ad1e6"];
+    const labels = [];
     objects.forEach((o, i) => {
       if ((o.label || "") === "robot") return;
       const p = scenePoint(o.x, o.y);
       if (!p) return;
       const x = toX(p.x);
       const y = toY(p.y);
+      const yaw = Number(o.yaw) || 0;
       const ow = Math.max(7, (Number(o.size_x) || 0.3) * scale);
       const oh = Math.max(7, (Number(o.size_y) || 0.3) * scale);
+      // Screen-space extent of the rotated box, for hit-testing and for judging
+      // whether a label has anywhere to go.
+      const absCos = Math.abs(Math.cos(yaw));
+      const absSin = Math.abs(Math.sin(yaw));
+      const bw = ow * absCos + oh * absSin;
+      const bh = ow * absSin + oh * absCos;
+      const hitIndex = perception.sceneHit.length;
+      perception.sceneHit.push({ x, y, w: bw, h: bh, label: o.label || "object" });
+      const hovered = hitIndex === perception.sceneHover;
       ctx.save();
       ctx.translate(x, y);
-      ctx.rotate(-(Number(o.yaw) || 0));
+      ctx.rotate(-yaw);
       ctx.fillStyle = palette[i % palette.length];
-      ctx.globalAlpha = 0.85;
+      ctx.globalAlpha = hovered ? 1 : 0.85;
       ctx.fillRect(-ow / 2, -oh / 2, ow, oh);
       ctx.globalAlpha = 1;
-      ctx.strokeStyle = "rgba(255,255,255,0.35)";
+      ctx.strokeStyle = hovered ? "#ffffff" : "rgba(255,255,255,0.35)";
+      ctx.lineWidth = hovered ? 2 : 1;
       ctx.strokeRect(-ow / 2, -oh / 2, ow, oh);
       ctx.restore();
-      ctx.fillStyle = "#dfe6f5";
-      ctx.font = "11px system-ui";
-      ctx.textAlign = "center";
-      ctx.fillText(o.label || "object", x, y + oh / 2 + 12);
+      labels.push({
+        x,
+        y: y + oh / 2 + 12,
+        text: o.label || "object",
+        area: bw * bh,
+        minExtent: Math.min(bw, bh),
+        force: hovered,
+      });
     });
+    drawObjectLabels(ctx, labels);
   }
+  if (perception.sceneHover >= perception.sceneHit.length) perception.sceneHover = -1;
 
   if (layers.robot !== false && rp) {
     const x = toX(rp.x);
@@ -3530,6 +3696,10 @@ function drawScene(canvas, scene) {
     ctx.textAlign = "center";
     ctx.fillText("robot", x, y + 18);
   }
+
+  // Zoom makes the scale a live variable, so state it rather than leaving the
+  // operator to infer distances from the grid.
+  drawScaleBar(ctx, w, h, scale);
 }
 
 async function perceptionPollLidar() {
@@ -3590,12 +3760,41 @@ async function perceptionPollScene() {
   }
 }
 
-function perceptionLoop() {
+// One round of tile fetches. The four run concurrently; the round settles only
+// after all of them have, including when the render path throws, so no single
+// failing tile can take the loop down with it.
+function perceptionRound() {
+  const round = [];
+  if (perception.tiles.camera) round.push(perceptionPollImage("camera", "camera"));
+  if (perception.tiles.depth) round.push(perceptionPollImage("depth", "depth"));
+  if (perception.tiles.lidar) round.push(perceptionPollLidar());
+  if (perception.tiles.scene) round.push(perceptionPollScene());
+  return Promise.allSettled(round);
+}
+
+// Poll on a self-rescheduling timer rather than setInterval. Every tile awaits
+// its fetch, and a slow robot -- an MCP handshake alone is two round-trips --
+// outlasts the interval, so setInterval used to stack rounds on top of each
+// other without bound. Here the next round is armed only once this one is done,
+// padded so a robot that keeps up still settles into the nominal cadence.
+async function perceptionTick() {
+  const started = performance.now();
+  try {
+    await perceptionRound();
+  } catch (_) {
+    // allSettled makes this unreachable today; the loop matters more than the
+    // round, so keep it alive whatever a future poller does.
+  }
   if (!perception.polling) return;
-  if (perception.tiles.camera) perceptionPollImage("camera", "camera");
-  if (perception.tiles.depth) perceptionPollImage("depth", "depth");
-  if (perception.tiles.lidar) perceptionPollLidar();
-  if (perception.tiles.scene) perceptionPollScene();
+  perceptionArm(Math.max(0, PERCEPTION_INTERVAL_MS - (performance.now() - started)));
+}
+
+function perceptionArm(delay) {
+  if (!perception.polling) return;
+  const timer = setTimeout(perceptionTick, delay);
+  // Only one tick is ever pending; drop the spent id so the set does not grow.
+  perception.timers.clear();
+  perception.timers.add(timer);
 }
 
 function renderPerceptionStrip(tiles) {
@@ -3645,23 +3844,127 @@ function bindSceneLayers() {
     const key = input.dataset.sceneLayer;
     input.addEventListener("change", () => {
       perception.sceneLayers[key] = input.checked;
-      const canvas = document.querySelector("[data-scene-canvas]");
-      if (canvas && perception.lastScene) drawScene(canvas, perception.lastScene);
+      redrawScene();
     });
   });
+}
+
+function sceneCanvasPoint(canvas, event) {
+  const rect = canvas.getBoundingClientRect();
+  return { px: event.clientX - rect.left, py: event.clientY - rect.top };
+}
+
+// Topmost hit wins: sceneHit is in draw order, so scan it backwards.
+function sceneHoverAt(px, py) {
+  const hit = perception.sceneHit;
+  for (let i = hit.length - 1; i >= 0; i -= 1) {
+    const b = hit[i];
+    if (Math.abs(px - b.x) <= b.w / 2 && Math.abs(py - b.y) <= b.h / 2) return i;
+  }
+  return -1;
+}
+
+function bindSceneView() {
+  const root = document.querySelector('.perception-tile[data-tile="scene"]');
+  const canvas = document.querySelector("[data-scene-canvas]");
+  if (!root || !canvas || canvas.dataset.viewBound) return;
+  canvas.dataset.viewBound = "1";
+  const view = perception.sceneView;
+
+  canvas.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    // Touching the map hands the viewport to the operator: no more auto-fit.
+    view.auto = false;
+    perception.scenePan = { id: event.pointerId, x: event.clientX, y: event.clientY };
+    canvas.setPointerCapture(event.pointerId);
+    canvas.style.cursor = "grabbing";
+  });
+
+  canvas.addEventListener("pointermove", (event) => {
+    const pan = perception.scenePan;
+    if (pan && pan.id === event.pointerId) {
+      if (view.center && view.scale) {
+        view.center = {
+          x: view.center.x - (event.clientX - pan.x) / view.scale,
+          y: view.center.y + (event.clientY - pan.y) / view.scale,
+        };
+      }
+      pan.x = event.clientX;
+      pan.y = event.clientY;
+      redrawScene();
+      return;
+    }
+    const { px, py } = sceneCanvasPoint(canvas, event);
+    const found = sceneHoverAt(px, py);
+    if (found === perception.sceneHover) return;
+    perception.sceneHover = found;
+    canvas.style.cursor = found >= 0 ? "pointer" : "";
+    redrawScene();
+  });
+
+  const endPan = (event) => {
+    const pan = perception.scenePan;
+    if (!pan || pan.id !== event.pointerId) return;
+    perception.scenePan = null;
+    if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+    canvas.style.cursor = "";
+  };
+  canvas.addEventListener("pointerup", endPan);
+  canvas.addEventListener("pointercancel", endPan);
+
+  canvas.addEventListener("pointerleave", () => {
+    if (perception.scenePan || perception.sceneHover === -1) return;
+    perception.sceneHover = -1;
+    canvas.style.cursor = "";
+    redrawScene();
+  });
+
+  // Zoom about the pointer, so the world point under it stays put.
+  canvas.addEventListener("wheel", (event) => {
+    if (!view.scale || !view.center) return;
+    event.preventDefault();
+    const { px, py } = sceneCanvasPoint(canvas, event);
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    const wx = view.center.x + (px - w / 2) / view.scale;
+    const wy = view.center.y - (py - h / 2) / view.scale;
+    view.scale = Math.min(400, Math.max(2, view.scale * Math.exp(-event.deltaY * 0.0015)));
+    view.center = {
+      x: wx - (px - w / 2) / view.scale,
+      y: wy + (py - h / 2) / view.scale,
+    };
+    view.auto = false;
+    redrawScene();
+  }, { passive: false });
+
+  const fit = root.querySelector('[data-scene-view="fit"]');
+  if (fit) {
+    fit.addEventListener("click", () => {
+      view.auto = true;
+      view.fittedKey = null;
+      redrawScene();
+    });
+  }
+  const follow = root.querySelector('[data-scene-view="follow"]');
+  if (follow) {
+    follow.addEventListener("change", () => {
+      view.follow = follow.checked;
+      redrawScene();
+    });
+  }
 }
 
 function startPerception() {
   if (perception.polling) return;
   perception.polling = true;
   perceptionRefresh();
-  const timer = setInterval(perceptionLoop, 1000);
-  perception.timers.add(timer);
+  perceptionArm(0);
 }
 
 function stopPerception() {
   perception.polling = false;
-  for (const timer of perception.timers) clearInterval(timer);
+  for (const timer of perception.timers) clearTimeout(timer);
   perception.timers.clear();
 }
 

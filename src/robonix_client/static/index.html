@@ -192,11 +192,16 @@
                 <header class="perception-tile-header">
                   <h3 data-i18n="Scene Map">Scene Map</h3>
                   <div class="perception-tile-actions">
+                    <div class="perception-layers" role="group" data-i18n-aria-label="Map view" aria-label="Map view">
+                      <button class="perception-view-btn" type="button" data-scene-view="fit" data-i18n="fit">fit</button>
+                      <label class="perception-layer"><input type="checkbox" data-scene-view="follow" /><span data-i18n="follow">follow</span></label>
+                    </div>
                     <div class="perception-layers" role="group" data-i18n-aria-label="Map layers" aria-label="Map layers">
                       <label class="perception-layer"><input type="checkbox" data-scene-layer="map" checked /><span data-i18n="map">map</span></label>
                       <label class="perception-layer"><input type="checkbox" data-scene-layer="regions" checked /><span data-i18n="regions">regions</span></label>
                       <label class="perception-layer"><input type="checkbox" data-scene-layer="objects" checked /><span data-i18n="objects">objects</span></label>
                       <label class="perception-layer"><input type="checkbox" data-scene-layer="robot" checked /><span data-i18n="robot">robot</span></label>
+                    </div>
                     </div>
                     <span class="perception-tile-meta" data-tile-meta></span>
                   </div>

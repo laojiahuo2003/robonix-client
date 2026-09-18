@@ -90,11 +90,14 @@ PERCEPTION_TILES: tuple[_PerceptionTile, ...] = (
 
 
 class _McpSession:
-    __slots__ = ("endpoint", "session_id")
+    __slots__ = ("endpoint", "session_id", "host")
 
-    def __init__(self, endpoint: str, session_id: str | None) -> None:
+    def __init__(self, endpoint: str, session_id: str | None, host: str | None = None) -> None:
         self.endpoint = endpoint
         self.session_id = session_id
+        # ``Host`` header to send, when the address we dial is not the address
+        # the provider advertised (see _rewrite_loopback).
+        self.host = host
 
 
 # Endpoint + session cache keyed by (atlas, contract_id).  The MCP handshake
@@ -103,14 +106,37 @@ _session_cache: dict[tuple[str, str], _McpSession] = {}
 _session_lock = threading.Lock()
 
 
-def _post_json(url: str, payload: dict[str, Any], session_id: str | None = None) -> tuple[str, str | None]:
+# Robot endpoints are reached directly, never through a system proxy. A
+# developer machine often has one configured (urllib picks it up from the
+# Windows registry, not just from ``http_proxy``), and it routes by Host: a
+# rewritten loopback Host gets sent to the wrong upstream and comes back 502.
+# Used only for rewritten endpoints, so a provider that advertises a routable
+# address keeps whatever proxy behaviour it had.
+_direct_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def _post_json(
+    url: str,
+    payload: dict[str, Any],
+    session_id: str | None = None,
+    host: str | None = None,
+) -> tuple[str, str | None]:
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=data, method="POST")
     req.add_header("Content-Type", "application/json")
     req.add_header("Accept", "application/json, text/event-stream")
+    opener = urllib.request.urlopen
+    if host:
+        # MCP servers that keep the SDK's DNS-rebinding protection on only
+        # accept a loopback Host. A provider reached over the LAN advertises
+        # 127.0.0.1 and we dial the robot's routable address instead, so the
+        # Host urllib would derive from that URL is refused with 421; claim the
+        # identity the provider advertised.
+        req.add_header("Host", host)
+        opener = _direct_opener.open
     if session_id:
         req.add_header("Mcp-Session-Id", session_id)
-    with urllib.request.urlopen(req, timeout=15.0) as resp:
+    with opener(req, timeout=15.0) as resp:
         body = resp.read().decode("utf-8")
         return body, resp.headers.get("Mcp-Session-Id")
 
@@ -130,7 +156,7 @@ def _sse_json(body: str) -> list[Any]:
     return messages
 
 
-def _handshake(endpoint: str) -> _McpSession:
+def _handshake(endpoint: str, host: str | None = None) -> _McpSession:
     body, session_id = _post_json(
         endpoint,
         {
@@ -143,6 +169,7 @@ def _handshake(endpoint: str) -> _McpSession:
                 "clientInfo": MCP_CLIENT_INFO,
             },
         },
+        host=host,
     )
     # A missing session id is tolerated for servers that keep stateless
     # endpoints; the initialized notification is best-effort regardless.
@@ -151,10 +178,11 @@ def _handshake(endpoint: str) -> _McpSession:
             endpoint,
             {"jsonrpc": "2.0", "method": "notifications/initialized"},
             session_id,
+            host,
         )
     except (urllib.error.URLError, OSError):
         pass
-    return _McpSession(endpoint, session_id)
+    return _McpSession(endpoint, session_id, host)
 
 
 def _call_tool_sync(sess: _McpSession, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -167,6 +195,7 @@ def _call_tool_sync(sess: _McpSession, tool: str, arguments: dict[str, Any]) -> 
             "params": {"name": tool, "arguments": arguments},
         },
         sess.session_id,
+        sess.host,
     )
     for message in _sse_json(body):
         if message.get("id") != 2:
@@ -189,8 +218,12 @@ def _call_tool_sync(sess: _McpSession, tool: str, arguments: dict[str, Any]) -> 
     raise RuntimeError(f"MCP {tool}: no tool result in response")
 
 
-async def _discover_mcp_endpoint(atlas_endpoint: str, contract_id: str) -> str:
-    """Return the MCP HTTP endpoint for ``contract_id``'s provider."""
+async def _discover_mcp_endpoint(atlas_endpoint: str, contract_id: str) -> tuple[str, str | None]:
+    """Return the MCP HTTP endpoint for ``contract_id``'s provider.
+
+    The second element is the ``Host`` header to send along with it, or ``None``
+    when the provider advertised an address we can use verbatim.
+    """
     providers = await query_atlas(atlas_endpoint, contract_id=contract_id, transport=3)
     for provider in providers:
         for cap in provider.capabilities:
@@ -233,8 +266,8 @@ async def mcp_call(
     key = (atlas_endpoint, contract_id)
     sess = _session_cache.get(key)
     if sess is None:
-        endpoint = await _discover_mcp_endpoint(atlas_endpoint, contract_id)
-        sess = await asyncio.to_thread(_handshake, endpoint)
+        endpoint, host = await _discover_mcp_endpoint(atlas_endpoint, contract_id)
+        sess = await asyncio.to_thread(_handshake, endpoint, host)
         with _session_lock:
             _session_cache[key] = sess
     try:
@@ -280,7 +313,7 @@ def _map_ui_base(atlas_endpoint: str) -> str:
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]", "0.0.0.0"})
 
 
-def _rewrite_loopback(endpoint: str, atlas_endpoint: str) -> str:
+def _rewrite_loopback(endpoint: str, atlas_endpoint: str) -> tuple[str, str | None]:
     """Point a loopback-advertised endpoint at the robot host the client used.
 
     Robot-side providers often advertise their MCP endpoint as 127.0.0.1 even
@@ -288,13 +321,18 @@ def _rewrite_loopback(endpoint: str, atlas_endpoint: str) -> str:
     a client running on another LAN host would dial its *own* loopback and
     never reach the robot. Only loopback hosts are rewritten; a provider that
     already advertises a routable address is left untouched.
+
+    Returns the rewritten endpoint and the loopback netloc to send as the HTTP
+    ``Host`` header. The two have to travel separately: we dial the routable
+    address, but an MCP server keeping the SDK's DNS-rebinding protection on
+    still expects its own advertised identity and answers 421 to anything else.
     """
     parsed = urlparse(endpoint)
     if parsed.hostname not in _LOOPBACK_HOSTS:
-        return endpoint
+        return endpoint, None
     host = _atlas_host(atlas_endpoint)
     netloc = f"{host}:{parsed.port}" if parsed.port else host
-    return urlunparse(parsed._replace(netloc=netloc))
+    return urlunparse(parsed._replace(netloc=netloc)), parsed.netloc
 
 
 def _fetch_json(url: str, timeout: float = 5.0) -> dict[str, Any]:
