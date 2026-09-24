@@ -165,16 +165,6 @@
                 </div>
               </div>
               <div class="perception-toolbar">
-                <div class="perception-layout-switcher" role="group" aria-label="Layout">
-                  <button type="button" class="layout-btn active" data-layout-mode="split" title="Split Layout (Map + Sensors)" data-i18n-title="Split Layout (Map + Sensors)">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="10" height="18" rx="2"/><rect x="15" y="3" width="6" height="5" rx="1"/><rect x="15" y="10" width="6" height="5" rx="1"/><rect x="15" y="17" width="6" height="4" rx="1"/></svg>
-                    <span data-i18n="Split">Split</span>
-                  </button>
-                  <button type="button" class="layout-btn" data-layout-mode="grid" title="2x2 Grid Layout" data-i18n-title="2x2 Grid Layout">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="3" width="8" height="8" rx="1"/><rect x="3" y="13" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/></svg>
-                    <span data-i18n="Grid">Grid</span>
-                  </button>
-                </div>
                 <button type="button" class="perception-control-btn" id="perceptionPauseBtn" title="Pause / Resume stream" data-i18n-title="Pause / Resume stream">
                   <svg class="pause-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
                   <svg class="play-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;"><polygon points="5 3 19 12 5 21 5 3"/></svg>
@@ -265,35 +255,6 @@
                   <img class="perception-camera-img" data-depth-img alt="Depth camera" data-i18n-alt="Depth Camera" draggable="false" style="display:none;" />
                 </div>
               </section>
-              <section class="perception-tile" data-tile="lidar">
-                <header class="perception-tile-header">
-                  <div class="tile-title-group">
-                    <span class="tile-live-indicator"></span>
-                    <svg class="tile-type-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m12 2 3 7h-6z"/><circle cx="12" cy="12" r="2"/></svg>
-                    <h3 data-i18n="LiDAR">LiDAR</h3>
-                  </div>
-                  <div class="perception-tile-tools">
-                    <span class="perception-tile-meta" data-tile-meta></span>
-                    <button type="button" class="tile-tool-btn" data-action="reset-lidar" title="Reset Range & Zoom" data-i18n-title="Reset Range & Zoom">
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
-                    </button>
-                    <button type="button" class="tile-tool-btn" data-action="snapshot" title="Save Snapshot" data-i18n-title="Save Snapshot">
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                    </button>
-                    <button type="button" class="tile-tool-btn" data-action="focus" title="Maximize Tile" data-i18n-title="Maximize Tile">
-                      <svg class="focus-expand-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
-                      <svg class="focus-collapse-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="10" y1="14" x2="3" y2="21"/></svg>
-                    </button>
-                  </div>
-                </header>
-                <div class="perception-tile-body perception-canvas-body">
-                  <div class="hud-bracket top-left"></div>
-                  <div class="hud-bracket top-right"></div>
-                  <div class="hud-bracket bottom-left"></div>
-                  <div class="hud-bracket bottom-right"></div>
-                  <canvas class="perception-canvas" data-lidar-canvas></canvas>
-                </div>
-              </section>
               <section class="perception-tile perception-tile-wide" data-tile="scene">
                 <header class="perception-tile-header">
                   <div class="tile-title-group">
@@ -379,15 +340,7 @@
                       <span class="channel-desc" data-i18n="Depth Camera point & depth map">Depth Camera point & depth map</span>
                       <code class="channel-contract">camera/depth_snapshot</code>
                     </div>
-                    <div class="perception-channel-card" data-channel="lidar">
-                      <div class="channel-head">
-                        <span class="channel-dot offline"></span>
-                        <strong data-i18n="LiDAR">LiDAR</strong>
-                        <span class="channel-status" data-i18n="Offline">Offline</span>
-                      </div>
-                      <span class="channel-desc" data-i18n="2D LiDAR planar laser scan">2D LiDAR planar laser scan</span>
-                      <code class="channel-contract">lidar/snapshot</code>
-                    </div>
+
                     <div class="perception-channel-card" data-channel="scene">
                       <div class="channel-head">
                         <span class="channel-dot offline"></span>

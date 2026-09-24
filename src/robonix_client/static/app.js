@@ -3158,7 +3158,7 @@ const perception = {
   depthColormap: true,
   lastDepthData: null,
   timers: new Set(),
-  tiles: { camera: false, depth: false, lidar: false, scene: false },
+  tiles: { camera: false, depth: false, scene: false },
   resources: {},
   sceneLayers: { map: true, regions: true, objects: true, lidar: true, robot: true },
   lastMap: null,
@@ -3305,12 +3305,6 @@ function applyPerceptionLayout() {
   const grid = document.getElementById("perceptionGrid");
   if (!grid) return;
 
-  // Sync toolbar layout buttons
-  const layoutBtns = document.querySelectorAll("[data-layout-mode]");
-  layoutBtns.forEach((b) => {
-    b.classList.toggle("active", b.dataset.layoutMode === perception.layoutMode && !perception.focusedTile);
-  });
-
   // Sync focus buttons on tile headers
   const focusBtns = document.querySelectorAll('.perception-tile button[data-action="focus"]');
   focusBtns.forEach((b) => {
@@ -3322,7 +3316,7 @@ function applyPerceptionLayout() {
   });
 
   // Reset tile inline grid assignments
-  for (const id of ["camera", "depth", "lidar", "scene"]) {
+  for (const id of ["camera", "depth", "scene"]) {
     const tile = perceptionTile(id);
     if (tile) {
       tile.style.gridColumn = "";
@@ -3331,7 +3325,7 @@ function applyPerceptionLayout() {
     }
   }
 
-  grid.classList.remove("layout-split", "layout-grid", "layout-focus");
+  grid.classList.remove("layout-focus");
 
   if (perception.focusedTile) {
     grid.classList.add("layout-focus");
@@ -3348,16 +3342,9 @@ function applyPerceptionLayout() {
     return;
   }
 
-  if (perception.layoutMode === "grid") {
-    grid.classList.add("layout-grid");
-    grid.style.gridTemplateColumns = "";
-    grid.style.gridTemplateRows = "";
-    return;
-  }
-
   // Default: layout-split (Large scene on left, stacked sensors on right)
   grid.classList.add("layout-split");
-  const sensors = ["camera", "depth", "lidar"].filter((id) => perception.tiles[id]);
+  const sensors = ["camera", "depth"].filter((id) => perception.tiles[id]);
   if (perception.tiles.scene) {
     grid.style.gridTemplateColumns = "minmax(0, 3.2fr) minmax(0, 2fr)";
     grid.style.gridTemplateRows = `repeat(${Math.max(1, sensors.length)}, minmax(0, 1fr))`;
@@ -4237,6 +4224,18 @@ async function perceptionPollScene() {
     }
   }
 
+  // Fetch lidar scan for the 2D scene map laser overlay if layer is active
+  if (perception.sceneLayers.lidar !== false) {
+    try {
+      const lidarData = await perceptionFetch("lidar");
+      if (lidarData && lidarData.ok && lidarData.scan) {
+        perception.lastLidarScan = lidarData.scan;
+      }
+    } catch (_) {
+      // Retain last known valid scan on map
+    }
+  }
+
   // Draw once with all updated scene & map data ready
   drawScene(canvas, data.scene);
 
@@ -4256,7 +4255,6 @@ function perceptionRound() {
   const round = [];
   if (perception.tiles.camera) round.push(perceptionPollImage("camera", "camera"));
   if (perception.tiles.depth) round.push(perceptionPollImage("depth", "depth"));
-  if (perception.tiles.lidar) round.push(perceptionPollLidar());
   if (perception.tiles.scene) round.push(perceptionPollScene());
   return Promise.allSettled(round);
 }
@@ -4291,7 +4289,7 @@ function renderPerceptionStrip(tiles) {
   const strip = document.getElementById("perceptionSourceStrip");
   if (!strip) return;
   strip.textContent = "";
-  for (const id of ["camera", "depth", "lidar", "scene"]) {
+  for (const id of ["camera", "depth", "scene"]) {
     const chip = document.createElement("span");
     chip.className = `perception-source-chip ${tiles[id] ? "online" : "offline"}`;
     chip.textContent = id;
@@ -4302,7 +4300,7 @@ function renderPerceptionStrip(tiles) {
 function updatePerceptionEmptyDiagnostics(tiles) {
   const ep = document.getElementById("perceptionEmptyEndpoint");
   if (ep) ep.textContent = perceptionAtlas();
-  for (const id of ["camera", "depth", "lidar", "scene"]) {
+  for (const id of ["camera", "depth", "scene"]) {
     const card = document.querySelector(`.perception-channel-card[data-channel="${id}"]`);
     if (card) {
       const isOnline = !!tiles[id];
@@ -4581,18 +4579,7 @@ function bindPerceptionControls() {
     });
   }
 
-  // Layout mode buttons
-  const layoutBtns = document.querySelectorAll("[data-layout-mode]");
-  layoutBtns.forEach((btn) => {
-    if (btn.dataset.layoutBound) return;
-    btn.dataset.layoutBound = "1";
-    btn.addEventListener("click", () => {
-      perception.focusedTile = null;
-      perception.layoutMode = btn.dataset.layoutMode;
-      applyPerceptionLayout();
-      setTimeout(redrawPerceptionCanvases, 40);
-    });
-  });
+
 
   // Focus buttons on tile headers
   const focusBtns = document.querySelectorAll('.perception-tile button[data-action="focus"]');

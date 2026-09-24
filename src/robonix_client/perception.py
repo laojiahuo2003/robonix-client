@@ -49,6 +49,7 @@ CONTRACT_SCENE_REGIONS = "robonix/system/scene/list_regions"
 # its port as a deployment default in the same spirit as DEFAULT_ATLAS /
 # DEFAULT_LIAISON_PORT -- overridable without touching the robot side.
 MAP_UI_PORT = int(os.environ.get("ROBONIX_CLIENT_MAP_UI_PORT", "50107"))
+MAPPING_PORT = int(os.environ.get("ROBONIX_CLIENT_MAPPING_PORT", "8091"))
 
 @dataclass(frozen=True)
 class _PerceptionResource:
@@ -76,7 +77,6 @@ class _PerceptionTile:
 PERCEPTION_TILES: tuple[_PerceptionTile, ...] = (
     _PerceptionTile("camera", "sensors", (_PerceptionResource("rgb", CONTRACT_CAMERA_RGB),)),
     _PerceptionTile("depth", "sensors", (_PerceptionResource("depth", CONTRACT_CAMERA_DEPTH),)),
-    _PerceptionTile("lidar", "sensors", (_PerceptionResource("scan", CONTRACT_LIDAR),)),
     _PerceptionTile(
         "scene",
         "map",
@@ -310,6 +310,11 @@ def _map_ui_base(atlas_endpoint: str) -> str:
     return f"http://{_atlas_host(atlas_endpoint)}:{MAP_UI_PORT}"
 
 
+def _mapping_base(atlas_endpoint: str) -> str:
+    """HTTP base of the robot's mapping service, host derived from Atlas."""
+    return f"http://{_atlas_host(atlas_endpoint)}:{MAPPING_PORT}"
+
+
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]", "0.0.0.0"})
 
 
@@ -338,6 +343,36 @@ def _rewrite_loopback(endpoint: str, atlas_endpoint: str) -> tuple[str, str | No
 def _fetch_json(url: str, timeout: float = 5.0) -> dict[str, Any]:
     with urllib.request.urlopen(url, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
+
+
+async def _camera_fallback(atlas_endpoint: str, kind: str) -> dict[str, Any] | None:
+    """Fallback to scene HTTP service (/api/camera) when MCP snapshot fails or is absent."""
+    try:
+        url = f"{_map_ui_base(atlas_endpoint)}/api/camera"
+        payload = await asyncio.to_thread(_fetch_json, url, 2.5)
+        item = payload.get(kind)
+        if item and item.get("png_b64"):
+            return {
+                "data": item["png_b64"],
+                "encoding": "png",
+                "width": item.get("width", 640),
+                "height": item.get("height", 480),
+            }
+    except Exception:
+        pass
+    return None
+
+
+async def _lidar_fallback(atlas_endpoint: str) -> dict[str, Any] | None:
+    """Fallback to mapping HTTP service (/api/range) when MCP lidar snapshot fails or is absent."""
+    try:
+        url = f"{_mapping_base(atlas_endpoint)}/api/range"
+        payload = await asyncio.to_thread(_fetch_json, url, 2.5)
+        if payload and payload.get("ranges"):
+            return payload
+    except Exception:
+        pass
+    return None
 
 
 async def map_occupancy(atlas_endpoint: str) -> dict[str, Any]:
@@ -382,6 +417,21 @@ async def perception_availability(atlas_endpoint: str) -> dict[str, Any]:
         resources[tile.id] = per_resource
         tiles[tile.id] = any(per_resource.values())
         groups.setdefault(tile.group, []).append(tile.id)
+
+    # Check camera HTTP fallback if MCP snapshot tools are absent
+    if not tiles.get("camera") or not tiles.get("depth"):
+        try:
+            url = f"{_map_ui_base(atlas_endpoint)}/api/camera"
+            cam_json = await asyncio.to_thread(_fetch_json, url, 2.0)
+            if cam_json.get("rgb") and cam_json["rgb"].get("png_b64"):
+                tiles["camera"] = True
+                resources.setdefault("camera", {})["rgb"] = True
+            if cam_json.get("depth") and cam_json["depth"].get("png_b64"):
+                tiles["depth"] = True
+                resources.setdefault("depth", {})["depth"] = True
+        except Exception:
+            pass
+
     # The occupancy base map is served by the robot-local HTTP service rather
     # than an Atlas contract; probe it separately and fold it into the scene
     # tile as a toggleable layer. A deployment that has the map service but no
@@ -392,15 +442,33 @@ async def perception_availability(atlas_endpoint: str) -> dict[str, Any]:
 
 
 async def camera_rgb(atlas_endpoint: str) -> dict[str, Any]:
-    return await mcp_call(atlas_endpoint, CONTRACT_CAMERA_RGB)
+    try:
+        return await mcp_call(atlas_endpoint, CONTRACT_CAMERA_RGB)
+    except Exception:
+        fallback = await _camera_fallback(atlas_endpoint, "rgb")
+        if fallback is not None:
+            return fallback
+        raise
 
 
 async def camera_depth(atlas_endpoint: str) -> dict[str, Any]:
-    return await mcp_call(atlas_endpoint, CONTRACT_CAMERA_DEPTH)
+    try:
+        return await mcp_call(atlas_endpoint, CONTRACT_CAMERA_DEPTH)
+    except Exception:
+        fallback = await _camera_fallback(atlas_endpoint, "depth")
+        if fallback is not None:
+            return fallback
+        raise
 
 
 async def lidar_scan(atlas_endpoint: str) -> dict[str, Any]:
-    return await mcp_call(atlas_endpoint, CONTRACT_LIDAR)
+    try:
+        return await mcp_call(atlas_endpoint, CONTRACT_LIDAR)
+    except Exception:
+        fallback = await _lidar_fallback(atlas_endpoint)
+        if fallback is not None:
+            return fallback
+        raise
 
 
 async def scene_snapshot(atlas_endpoint: str) -> dict[str, Any]:

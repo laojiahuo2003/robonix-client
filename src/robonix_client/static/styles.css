@@ -4040,41 +4040,6 @@ select:focus {
   gap: 10px;
 }
 
-.perception-layout-switcher {
-  display: inline-flex;
-  background: rgba(14, 25, 30, 0.85);
-  border: 1px solid rgba(95, 205, 216, 0.15);
-  border-radius: 8px;
-  padding: 2px;
-  gap: 2px;
-}
-
-.layout-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  background: transparent;
-  border: none;
-  color: var(--dim);
-  padding: 5px 9px;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 140ms ease;
-}
-
-.layout-btn:hover {
-  color: var(--text);
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.layout-btn.active {
-  background: rgba(95, 205, 216, 0.18);
-  color: #5ad1e6;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
-}
-
 .perception-control-btn {
   display: inline-flex;
   align-items: center;
@@ -4154,16 +4119,17 @@ select:focus {
   display: none !important;
 }
 
-/* Layout Split (Default) */
+/* Default Layout (Split: Map on left, Sensors on right) */
+.perception-grid,
 .perception-grid.layout-split {
   grid-template-columns: minmax(0, 3.2fr) minmax(0, 2fr);
-  grid-template-rows: repeat(3, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
 }
 
-/* Layout Grid 2x2 */
-.perception-grid.layout-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-  grid-template-rows: repeat(2, minmax(0, 1fr)) !important;
+.perception-grid .perception-tile[data-tile="scene"],
+.perception-grid.layout-split .perception-tile[data-tile="scene"] {
+  grid-column: 1;
+  grid-row: 1 / span 2;
 }
 
 /* Layout Focus (Maximized tile) */
