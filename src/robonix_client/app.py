@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from . import audio_server_control, perception
 from .audio_reverse_bridge import AudioReverseBridge
+from .health_api import router as health_router
 from .vitals_api import router as vitals_router
 from .transport import (
     DEFAULT_ATLAS,
@@ -65,6 +66,7 @@ class _RevalidatingStaticFiles(StaticFiles):
 
 app.mount("/static", _RevalidatingStaticFiles(directory=STATIC_DIR), name="static")
 app.include_router(vitals_router)
+app.include_router(health_router)
 _reverse_audio: AudioReverseBridge | None = None
 SETTINGS_PATH = Path(
     os.environ.get(

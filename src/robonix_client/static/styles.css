@@ -4969,3 +4969,203 @@ select:focus {
     grid-template-columns: 1fr;
   }
 }
+
+/* ── Compute Node panel (linux_health primitive telemetry) ────────────────── */
+
+.compute-node {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.compute-node-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.compute-node-title-line {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.compute-node-icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--panel-2);
+  color: var(--cyan);
+}
+
+.compute-node-title-line strong {
+  display: block;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.1px;
+}
+
+.compute-node-subtitle {
+  display: block;
+  overflow: hidden;
+  max-width: 40ch;
+  color: var(--dim);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compute-node-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.compute-node-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.compute-node-reconnect-icon {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.compute-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.compute-metric {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: var(--panel-2);
+}
+
+.compute-metric-icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--panel-3);
+  color: var(--cyan);
+}
+
+.compute-metric-copy {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.compute-metric-label {
+  display: block;
+  color: var(--dim);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.compute-metric-value {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.compute-metric-value strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #e5eceb;
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compute-metric-value span {
+  color: var(--dim);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.compute-metric.idle .compute-metric-icon { color: var(--amber); }
+.compute-metric.warn .compute-metric-icon { color: var(--red); }
+.compute-metric.stale { opacity: 0.7; }
+.compute-metric.stale .compute-metric-value strong { color: var(--muted); }
+
+.compute-charts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.compute-chart {
+  min-width: 0;
+  padding: 8px 10px 6px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: var(--panel-2);
+}
+
+.compute-chart-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.compute-chart-unit {
+  color: var(--dim);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.compute-chart-canvas {
+  position: relative;
+  width: 100%;
+  height: 92px;
+}
+
+.compute-chart-canvas canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+@media (max-width: 1120px) {
+  .compute-metrics,
+  .compute-charts {
+    grid-template-columns: 1fr;
+  }
+
+  .compute-chart-canvas {
+    height: 74px;
+  }
+}

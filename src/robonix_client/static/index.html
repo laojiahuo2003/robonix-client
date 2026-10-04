@@ -458,6 +458,61 @@
               </header>
               <div class="vitals-software-list" id="vitalsSoftwareList"></div>
             </section>
+            <section class="compute-node" id="computeNodeRoot" aria-labelledby="computeNodeTitle">
+              <header class="compute-node-header">
+                <div class="compute-node-title-line">
+                  <span class="compute-node-icon" id="computeNodeHeaderIcon" aria-hidden="true"></span>
+                  <div>
+                    <strong id="computeNodeTitle" data-i18n="Compute Node">Compute Node</strong>
+                    <span class="compute-node-subtitle" data-i18n="linux_health primitive telemetry">linux_health primitive telemetry</span>
+                  </div>
+                </div>
+                <div class="compute-node-actions">
+                  <span class="compute-node-status"><span class="vitals-status-dot stale" id="computeNodeStatusDot" data-compute-dot></span><span id="computeNodeUpdated">--</span></span>
+                  <span class="health-label stale" id="computeNodeSource" data-compute-source></span>
+                  <button class="icon-button vitals-refresh" id="computeNodeReconnect" type="button" title="Reconnect compute-node stream" data-i18n-title="Reconnect compute-node stream" aria-label="Reconnect compute-node stream" data-i18n-aria-label="Reconnect compute-node stream">
+                    <span class="compute-node-reconnect-icon">⟳</span>
+                  </button>
+                </div>
+              </header>
+              <div class="compute-metrics">
+                <div class="compute-metric ok" id="compKpiCpu">
+                  <span class="compute-metric-icon" id="compKpiCpuSpan" aria-hidden="true"></span>
+                  <div class="compute-metric-copy">
+                    <span class="compute-metric-label" data-compute-label data-i18n="CPU temp">CPU temp</span>
+                    <div class="compute-metric-value"><strong data-compute-value>--</strong><span data-compute-unit id="compKpiCpuUnit">°C</span></div>
+                  </div>
+                </div>
+                <div class="compute-metric ok" id="compKpiVolt">
+                  <span class="compute-metric-icon" id="compKpiVoltSpan" aria-hidden="true"></span>
+                  <div class="compute-metric-copy">
+                    <span class="compute-metric-label" data-compute-label data-i18n="Voltage">Voltage</span>
+                    <div class="compute-metric-value"><strong data-compute-value>--</strong><span data-compute-unit id="compKpiVoltUnit">V</span></div>
+                  </div>
+                </div>
+                <div class="compute-metric ok" id="compKpiCurr">
+                  <span class="compute-metric-icon" id="compKpiCurrSpan" aria-hidden="true"></span>
+                  <div class="compute-metric-copy">
+                    <span class="compute-metric-label" data-compute-label data-i18n="Current">Current</span>
+                    <div class="compute-metric-value"><strong data-compute-value>--</strong><span data-compute-unit id="compKpiCurrUnit">A</span></div>
+                  </div>
+                </div>
+              </div>
+              <div class="compute-charts">
+                <div class="compute-chart">
+                  <div class="compute-chart-head"><span data-compute-label data-i18n="CPU temp">CPU temp</span><span class="compute-chart-unit">°C</span></div>
+                  <div class="compute-chart-canvas"><canvas id="compChartCpu"></canvas></div>
+                </div>
+                <div class="compute-chart">
+                  <div class="compute-chart-head"><span data-compute-label data-i18n="Voltage">Voltage</span><span class="compute-chart-unit">V</span></div>
+                  <div class="compute-chart-canvas"><canvas id="compChartVolt"></canvas></div>
+                </div>
+                <div class="compute-chart">
+                  <div class="compute-chart-head"><span data-compute-label data-i18n="Current">Current</span><span class="compute-chart-unit">A</span></div>
+                  <div class="compute-chart-canvas"><canvas id="compChartCurr"></canvas></div>
+                </div>
+              </div>
+            </section>
             <footer class="vitals-page-credit" id="vitalsCredit" aria-label="Vitals created by Zhenyu Zhang">
               Made by Zhenyu Zhang
             </footer>
