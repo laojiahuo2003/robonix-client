@@ -1050,7 +1050,7 @@ function handlePilotEvent(event) {
   if (event.kind === "text_chunk" && event.textChunk) {
     appendAgent(event.textChunk);
   } else if (event.kind === "final_text" && event.finalText) {
-    finalizeAgent(event.finalText);
+    finalizeAgent(t(event.finalText));
   } else if (event.kind === "plan" && event.plan) {
     state.plan = event.plan;
     upsertPlanRecord(event.plan);
@@ -1108,8 +1108,11 @@ function handlePilotEvent(event) {
       state.taskRunning = false;
       setBusy(state.activeStreams > 0);
     }
-    addTimeline("status", event.status.message || t("state {state}", { state: event.status.state }));
-    if (event.status.message) addStatusLine(event.status.message);
+    addTimeline(
+      "status",
+      event.status.message ? t(event.status.message) : t("state {state}", { state: event.status.state }),
+    );
+    if (event.status.message) addStatusLine(t(event.status.message));
   }
 }
 
@@ -1197,8 +1200,10 @@ function finishVoiceCaptureUi() {
 
 function hasActiveTurn() {
   if (state.activeTurnId) return true;
-  const status = String(state.taskState?.status || "").trim().toLowerCase();
-  return state.taskRunning || ["in_progress", "running", "planning", "executing"].includes(status);
+  // `state.taskState` outlives a turn: Completed/Failed clear `taskRunning` but
+  // leave the last snapshot behind, so re-reading its status here kept every
+  // later message labelled as a steer into a turn that had already ended.
+  return state.taskRunning;
 }
 
 function addMessage(role, text, meta = "", attachments = []) {
@@ -1252,11 +1257,24 @@ function finalizeAgent(text) {
     state.activeAgentId = null;
     return;
   }
-  if (!state.activeAgentId) {
-    addMessage("agent", text, "Robonix");
-    return;
+  // Status lines interleaved mid-turn clear `activeAgentId` (addMessage drops it
+  // for every non-agent role), so a FinalText arriving right after a status such
+  // as "Plan control accepted" would open a second bubble for text that was
+  // already streamed. Skip trailing status lines and merge into this turn's last
+  // agent bubble instead; any other role in between (a user message starts a new
+  // turn) means this is genuinely a fresh bubble.
+  let targetId = state.activeAgentId;
+  if (!targetId) {
+    for (let i = state.messages.length - 1; i >= 0; i -= 1) {
+      const message = state.messages[i];
+      if (message.role === "status") continue;
+      if (message.role === "agent") targetId = message.id;
+      break;
+    }
   }
-  const msg = state.messages.find((item) => item.id === state.activeAgentId);
+  const msg = targetId
+    ? state.messages.find((item) => item.id === targetId)
+    : null;
   if (msg) {
     const current = msg.text || "";
     msg.text = mergeFinalText(current, text);
@@ -1278,6 +1296,178 @@ function mergeFinalText(current, finalText) {
   return `${currentText}${currentText.endsWith("\n") ? "" : "\n"}${final}`;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Minimal Markdown rendering for agent replies.
+//
+// The planner answers in Markdown (`**bold**`, numbered lists, code spans) but
+// the bubble used to draw that source literally because it appended a text node.
+// This renders the subset the model actually emits into DOM nodes built with
+// createElement/textContent only — never innerHTML — so model output can never
+// inject markup or scripts. Only agent bubbles go through here; status/user/RTDL
+// messages stay plain text. Deliberately not supported: tables, nested lists,
+// and `_`/`__` emphasis (they would mangle snake_case identifiers and tool ids).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const MD_HEADING = /^(#{1,6})\s+(.*)$/;
+const MD_ULIST = /^\s*[-*+]\s+(.*)$/;
+const MD_OLIST = /^\s*(\d+)[.)]\s+(.*)$/;
+const MD_RULE = /^\s*(-{3,}|\*{3,}|_{3,})\s*$/;
+const MD_FENCE = /^\s*```\s*([\w+-]*)\s*$/;
+const MD_QUOTE = /^\s*>\s?(.*)$/;
+const MD_LINK = /^(https?:\/\/|mailto:)/i;
+
+/// Cache the parsed nodes per message so a long stream does not re-parse every
+/// bubble on every chunk. Keyed by the message object, so nothing is stored on
+/// the message itself (it is persisted to disk as JSON).
+const markdownCache = new WeakMap();
+
+function appendAgentMarkdown(el, message) {
+  const source = String(message.text || "");
+  let cached = markdownCache.get(message);
+  if (!cached || cached.source !== source) {
+    cached = { source, nodes: markdownNodes(source) };
+    markdownCache.set(message, cached);
+  }
+  // renderMessages clears the container first, so the cached nodes are detached
+  // and safe to re-append.
+  cached.nodes.forEach((node) => el.appendChild(node));
+}
+
+function markdownNodes(text) {
+  const lines = String(text || "").replace(/\r\n?/g, "\n").split("\n");
+  const nodes = [];
+  const paragraph = [];
+  const flushParagraph = () => {
+    if (!paragraph.length) return;
+    const el = document.createElement("p");
+    appendInline(el, paragraph.join("\n"));
+    nodes.push(el);
+    paragraph.length = 0;
+  };
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const fence = line.match(MD_FENCE);
+    if (fence) {
+      flushParagraph();
+      const body = [];
+      i += 1;
+      while (i < lines.length && !MD_FENCE.test(lines[i])) {
+        body.push(lines[i]);
+        i += 1;
+      }
+      if (i < lines.length) i += 1; // consume the closing fence when present
+      const pre = document.createElement("pre");
+      const code = document.createElement("code");
+      if (fence[1]) code.className = `language-${fence[1]}`;
+      code.textContent = body.join("\n");
+      pre.appendChild(code);
+      nodes.push(pre);
+      continue;
+    }
+    if (!line.trim()) {
+      flushParagraph();
+      i += 1;
+      continue;
+    }
+    const heading = line.match(MD_HEADING);
+    if (heading) {
+      flushParagraph();
+      // Keep model headings below the page's own h1/h2 rather than letting a
+      // leading `#` outrank the surrounding panel titles.
+      const el = document.createElement(`h${Math.min(heading[1].length + 2, 6)}`);
+      appendInline(el, heading[2].trim());
+      nodes.push(el);
+      i += 1;
+      continue;
+    }
+    if (MD_RULE.test(line)) {
+      flushParagraph();
+      nodes.push(document.createElement("hr"));
+      i += 1;
+      continue;
+    }
+    if (MD_QUOTE.test(line)) {
+      flushParagraph();
+      const quote = document.createElement("blockquote");
+      const body = [];
+      while (i < lines.length && MD_QUOTE.test(lines[i])) {
+        body.push(lines[i].match(MD_QUOTE)[1]);
+        i += 1;
+      }
+      appendInline(quote, body.join("\n"));
+      nodes.push(quote);
+      continue;
+    }
+    const ordered = line.match(MD_OLIST);
+    if (ordered || MD_ULIST.test(line)) {
+      flushParagraph();
+      const list = document.createElement(ordered ? "ol" : "ul");
+      if (ordered && Number(ordered[1]) > 1) list.start = Number(ordered[1]);
+      while (i < lines.length) {
+        const item = lines[i].match(ordered ? MD_OLIST : MD_ULIST);
+        if (!item) break;
+        const li = document.createElement("li");
+        appendInline(li, ordered ? item[2] : item[1]);
+        list.appendChild(li);
+        i += 1;
+      }
+      nodes.push(list);
+      continue;
+    }
+    paragraph.push(line.trim());
+    i += 1;
+  }
+  flushParagraph();
+  return nodes;
+}
+
+function appendInline(parent, text) {
+  // A fresh regex per call: the recursive calls below would otherwise share one
+  // global lastIndex, which a nested scan resets to 0 and the outer loop then
+  // rescans from the start forever.
+  const pattern =
+    /(`+)([\s\S]*?)\1|\*\*([\s\S]+?)\*\*|\*([\s\S]+?)\*|\[([^\]]+)\]\(([^)\s]+)\)|\n/g;
+  let last = 0;
+  let match;
+  while ((match = pattern.exec(text))) {
+    if (match.index > last) {
+      parent.appendChild(document.createTextNode(text.slice(last, match.index)));
+    }
+    last = pattern.lastIndex;
+    if (match[2] !== undefined) {
+      const code = document.createElement("code");
+      code.textContent = match[2].trim();
+      parent.appendChild(code);
+    } else if (match[3] !== undefined) {
+      const strong = document.createElement("strong");
+      appendInline(strong, match[3]);
+      parent.appendChild(strong);
+    } else if (match[4] !== undefined) {
+      const em = document.createElement("em");
+      appendInline(em, match[4]);
+      parent.appendChild(em);
+    } else if (match[5] !== undefined) {
+      const href = match[6];
+      if (MD_LINK.test(href)) {
+        const link = document.createElement("a");
+        link.href = href;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        appendInline(link, match[5]);
+        parent.appendChild(link);
+      } else {
+        parent.appendChild(document.createTextNode(match[5]));
+      }
+    } else {
+      parent.appendChild(document.createElement("br"));
+    }
+  }
+  if (last < text.length) {
+    parent.appendChild(document.createTextNode(text.slice(last)));
+  }
+}
+
 function renderMessages() {
   const root = $("messages");
   clear(root);
@@ -1296,7 +1486,11 @@ function renderMessages() {
       meta.textContent = message.meta;
       el.appendChild(meta);
     }
-    el.appendChild(document.createTextNode(message.text));
+    if (message.role === "agent") {
+      appendAgentMarkdown(el, message);
+    } else {
+      el.appendChild(document.createTextNode(message.text));
+    }
     if (message.planRound) {
       const action = document.createElement("button");
       action.type = "button";
@@ -1735,7 +1929,7 @@ function statusKey(status) {
   const raw = String(status || "pending").toLowerCase();
   if (raw === "succeeded" || raw === "success" || raw === "done" || raw === "completed") return "success";
   if (["failed", "failure", "error", "canceled", "cancelled", "timeout", "aborted"].includes(raw)) return "failed";
-  if (raw === "running" || raw === "in_progress" || raw === "active") return "running";
+  if (["running", "in_progress", "active", "verifying", "paused"].includes(raw)) return "running";
   if (raw === "ended" || raw === "inactive") return "ended";
   return "pending";
 }

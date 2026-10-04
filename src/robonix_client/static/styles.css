@@ -829,6 +829,78 @@ h2 {
   align-self: flex-start;
   border-color: #274540;
   background: rgba(17, 35, 32, 0.86);
+  /* Agent replies are rendered from Markdown into block elements; the base
+     .message pre-wrap would turn the whitespace between blocks into blank
+     lines, so spacing is owned by the rules below instead. */
+  white-space: normal;
+}
+
+.message.agent p {
+  margin: 0 0 8px;
+}
+
+.message.agent > :last-child {
+  margin-bottom: 0;
+}
+
+.message.agent h3,
+.message.agent h4,
+.message.agent h5,
+.message.agent h6 {
+  margin: 6px 0;
+  font-size: 13px;
+  font-weight: 720;
+}
+
+.message.agent ul,
+.message.agent ol {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+
+.message.agent li {
+  margin: 2px 0;
+}
+
+.message.agent code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.32);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+}
+
+.message.agent pre {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.36);
+  overflow-x: auto;
+}
+
+.message.agent pre code {
+  padding: 0;
+  background: none;
+  font-size: 11.5px;
+  white-space: pre;
+}
+
+.message.agent blockquote {
+  margin: 0 0 8px;
+  padding: 2px 0 2px 10px;
+  border-left: 2px solid var(--line);
+  color: var(--muted);
+}
+
+.message.agent hr {
+  margin: 8px 0;
+  border: 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.message.agent a {
+  color: #8ee2ec;
+  text-decoration: underline;
 }
 
 .message.status {

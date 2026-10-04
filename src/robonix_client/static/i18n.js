@@ -443,6 +443,8 @@
     "IN_PROGRESS": "进行中",
     "CANCELED": "已取消",
     "TIMEOUT": "超时",
+    "PAUSED": "已暂停",
+    "VERIFYING": "校验中",
     "OK": "正常",
     "UNKNOWN": "未知",
     "IDLE": "空闲",
@@ -457,6 +459,19 @@
     "canceled": "已取消",
     "aborted": "已中止",
     "degraded": "降级",
+
+    // Pilot status / fallback messages (sent verbatim by the backend)
+    "Planning the next step": "规划下一步",
+    "Plan control accepted": "计划控制已接受",
+    "Waiting for in-flight work": "等待在飞计划完成",
+    "VLM response delayed; retrying once": "VLM 响应延迟；重试一次",
+    "interrupted": "已中断",
+    "stop requested for this session; its active RTDL plans are being cancelled":
+      "已请求停止本会话；正在取消其活动 RTDL 计划",
+    "no active turn exists for this session": "本会话没有活动轮次",
+    "I need more information before I can continue.": "我需要更多信息才能继续。",
+    "I could not match that plan-control request to any in-flight plan.":
+      "没能把这个计划控制请求对应到任何在飞计划。",
 
     // Perception page
     "Live Sensor Data": "实时传感器数据",
