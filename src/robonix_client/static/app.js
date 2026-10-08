@@ -286,12 +286,10 @@ async function init() {
   bindEvents();
   bindSceneLayers();
   bindSceneView();
-  bindLidarView();
   bindPerceptionControls();
   bindCameraSnapshot();
   bindDepthColormap();
   bindDepthHover();
-  bindLidarReset();
   renderAudioBars();
   renderHistory();
   renderMessages();
@@ -3357,8 +3355,6 @@ const perception = {
   sceneLayers: { map: true, regions: true, objects: true, lidar: true, robot: true },
   lastMap: null,
   lastLidarScan: null,
-  lidarZoom: 1.0,
-  lidarPan: { x: 0, y: 0 },
   lastScene: null,
   mapAvailable: false,
   mapImage: null,
@@ -3372,6 +3368,11 @@ const perception = {
   sceneHover: -1,
   scenePan: null,
 };
+
+// Tile ids the Perception page lays out, mirroring PERCEPTION_TILES in
+// perception.py. Kept in one place so the layout loops and the telemetry
+// badge denominator never drift apart.
+const PERCEPTION_TILE_IDS = ["camera", "depth", "scene"];
 
 // Precomputed 256-entry Turbo/Spectral palette for pseudo-color depth heatmap
 const DEPTH_COLORMAP = (() => {
@@ -3510,7 +3511,7 @@ function applyPerceptionLayout() {
   });
 
   // Reset tile inline grid assignments
-  for (const id of ["camera", "depth", "scene"]) {
+  for (const id of PERCEPTION_TILE_IDS) {
     const tile = perceptionTile(id);
     if (tile) {
       tile.style.gridColumn = "";
@@ -3620,261 +3621,6 @@ async function perceptionPollImage(id, endpoint) {
       placeholder.hidden = false;
     }
   }
-}
-
-// A LaserScan's robot-centric frame (REP-103):
-// - +x is Forward (heading, angle a = 0)
-// - +y is Left (angle a = +π/2)
-// - -y is Right (angle a = -π/2)
-// - -x is Backward (angle a = ±π)
-//
-// In standard PPI/radar displays:
-// - Robot Forward (+x) points UP (-y in screen space)
-// - Robot Left (+y) points LEFT (-x in screen space)
-// - Robot Right (-y) points RIGHT (+x in screen space)
-// - Robot Backward (-x) points DOWN (+y in screen space)
-//
-// Screen projection from polar (r, a):
-//   x_screen = cx - r * sin(a) * scale
-//   y_screen = cy - r * cos(a) * scale
-function drawLidar(canvas, scan) {
-  const { ctx, w, h } = fitCanvas(canvas);
-  const pan = perception.lidarPan || { x: 0, y: 0 };
-  const cx = w / 2 + pan.x;
-  const cy = h / 2 + pan.y;
-  const maxRange = Math.max(1.0, Number(scan.range_max) || 6.0);
-  const zoom = perception.lidarZoom || 1.0;
-  const baseScale = (Math.min(w, h) / 2 - 24) / maxRange;
-  const scale = baseScale * zoom;
-
-  ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = "#0b1618";
-  ctx.fillRect(0, 0, w, h);
-
-  const ranges = scan.ranges || [];
-  const angleMin = Number(scan.angle_min) || -Math.PI / 2;
-  const angleMax = Number(scan.angle_max) || Math.PI / 2;
-  const angleInc = Number(scan.angle_increment) || 0.01;
-  const rangeMin = Number(scan.range_min) || 0.01;
-  const fovSpan = Math.abs(angleMax - angleMin);
-
-  // Crosshairs through center
-  ctx.strokeStyle = "rgba(95, 205, 216, 0.08)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(cx, 16); ctx.lineTo(cx, h - 16);
-  ctx.moveTo(16, cy); ctx.lineTo(w - 16, cy);
-  ctx.stroke();
-
-  // Active scan sector highlight for partial FOV (e.g. 180° front scan)
-  if (fovSpan < Math.PI * 1.95) {
-    ctx.save();
-    // Canvas angle where 12 o'clock is -Math.PI/2: theta = -Math.PI/2 - a
-    const thetaStart = -Math.PI / 2 - angleMax;
-    const thetaEnd = -Math.PI / 2 - angleMin;
-    ctx.fillStyle = "rgba(53, 224, 160, 0.04)";
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.arc(cx, cy, maxRange * scale, thetaStart, thetaEnd, false);
-    ctx.closePath();
-    ctx.fill();
-
-    // Boundary rays
-    ctx.strokeStyle = "rgba(53, 224, 160, 0.22)";
-    ctx.setLineDash([3, 3]);
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.lineTo(cx + Math.cos(thetaStart) * maxRange * scale, cy + Math.sin(thetaStart) * maxRange * scale);
-    ctx.moveTo(cx, cy);
-    ctx.lineTo(cx + Math.cos(thetaEnd) * maxRange * scale, cy + Math.sin(thetaEnd) * maxRange * scale);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.restore();
-  }
-
-  // Concentric distance rings
-  const step = maxRange <= 6 ? 1 : (maxRange <= 12 ? 2 : 5);
-  for (let r = step; r <= Math.floor(maxRange); r += step) {
-    const isEdge = r === Math.floor(maxRange);
-    ctx.strokeStyle = isEdge ? "rgba(95, 205, 216, 0.22)" : "rgba(120, 140, 180, 0.12)";
-    ctx.setLineDash(r % (step * 2) === 0 ? [3, 3] : []);
-    ctx.beginPath();
-    ctx.arc(cx, cy, r * scale, 0, Math.PI * 2);
-    ctx.stroke();
-
-    // Range distance label
-    ctx.fillStyle = "rgba(154, 169, 173, 0.4)";
-    ctx.font = "9px ui-monospace, SFMono-Regular, Menlo, monospace";
-    ctx.textAlign = "left";
-    ctx.textBaseline = "bottom";
-    ctx.fillText(`${r}m`, cx + 4, cy - r * scale + 11);
-  }
-  ctx.setLineDash([]);
-
-  // Collect and project valid points
-  const pts = [];
-  for (let i = 0; i < ranges.length; i += 1) {
-    const r = Number(ranges[i]);
-    if (!Number.isFinite(r) || r < rangeMin || r > maxRange) {
-      pts.push(null);
-      continue;
-    }
-    const a = angleMin + i * angleInc;
-    const sx = cx - r * Math.sin(a) * scale;
-    const sy = cy - r * Math.cos(a) * scale;
-    pts.push({ r, a, x: sx, y: sy });
-  }
-
-  // Connect adjacent points to render continuous obstacle boundaries
-  ctx.strokeStyle = "rgba(53, 224, 160, 0.4)";
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  let drawing = false;
-  for (let i = 0; i < pts.length; i += 1) {
-    const p = pts[i];
-    if (!p) {
-      drawing = false;
-      continue;
-    }
-    const prev = i > 0 ? pts[i - 1] : null;
-    if (prev && Math.abs(p.r - prev.r) < 0.25) {
-      if (!drawing) {
-        ctx.moveTo(prev.x, prev.y);
-        drawing = true;
-      }
-      ctx.lineTo(p.x, p.y);
-    } else {
-      drawing = false;
-    }
-  }
-  ctx.stroke();
-
-  // Draw points with distance-coded tint and crisp circles
-  for (let i = 0; i < pts.length; i += 1) {
-    const p = pts[i];
-    if (!p) continue;
-    ctx.fillStyle = p.r < 0.6 ? "#f2726f" : (p.r < 1.2 ? "#ffd166" : "#35e0a0");
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 1.6, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // Draw center robot indicator (pointing UP / Forward)
-  drawLidarCenterRobot(ctx, cx, cy);
-
-  // Draw heading / orientation annotations
-  drawLidarHeading(ctx, w, h, cx, cy, maxRange * scale, scan.header && scan.header.frame_id, fovSpan);
-}
-
-function drawLidarCenterRobot(ctx, cx, cy) {
-  ctx.save();
-  ctx.translate(cx, cy);
-
-  // Robot directional chevron pointing forward (UP)
-  ctx.fillStyle = "rgba(255, 209, 102, 0.85)";
-  ctx.beginPath();
-  ctx.moveTo(0, -9);
-  ctx.lineTo(6, 6);
-  ctx.lineTo(0, 3);
-  ctx.lineTo(-6, 6);
-  ctx.closePath();
-  ctx.fill();
-
-  // Center pivot pin
-  ctx.fillStyle = "#0b1618";
-  ctx.beginPath();
-  ctx.arc(0, 0, 1.5, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.restore();
-}
-
-function drawLidarHeading(ctx, w, h, cx, cy, reach, frameId, fovSpan) {
-  const ink = "rgba(241, 186, 79, 0.85)";
-  const dim = "rgba(154, 169, 173, 0.75)";
-
-  ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
-
-  // Top forward indicator: arrow pointing UP
-  ctx.fillStyle = ink;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "top";
-  ctx.fillText("▲ " + t("FRONT"), cx, 6);
-
-  // Lateral indicators (Left / Right)
-  ctx.fillStyle = "rgba(154, 169, 173, 0.4)";
-  ctx.textBaseline = "middle";
-  ctx.textAlign = "left";
-  ctx.fillText("L", 10, cy);
-  ctx.textAlign = "right";
-  ctx.fillText("R", w - 10, cy);
-
-  // Footer metadata
-  ctx.textBaseline = "alphabetic";
-  if (frameId) {
-    ctx.fillStyle = dim;
-    ctx.textAlign = "left";
-    ctx.fillText(String(frameId), 8, h - 8);
-  }
-
-  // FOV badge at bottom-right
-  const fovDeg = fovSpan != null ? Math.round(fovSpan * (180 / Math.PI)) : null;
-  ctx.fillStyle = dim;
-  ctx.textAlign = "right";
-  const zoomText = (perception.lidarZoom && perception.lidarZoom !== 1.0) ? ` · ${(perception.lidarZoom * 100).toFixed(0)}%` : "";
-  ctx.fillText(fovDeg ? `FOV ${fovDeg}°${zoomText}` : `${zoomText}`, w - 8, h - 8);
-}
-
-function drawLidarStandby(canvas) {
-  const { ctx, w, h } = fitCanvas(canvas);
-  const pan = perception.lidarPan || { x: 0, y: 0 };
-  const cx = w / 2 + pan.x;
-  const cy = h / 2 + pan.y;
-  const maxRange = 6.0;
-  const zoom = perception.lidarZoom || 1.0;
-  const baseScale = (Math.min(w, h) / 2 - 24) / maxRange;
-  const scale = baseScale * zoom;
-
-  ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = "#0b1618";
-  ctx.fillRect(0, 0, w, h);
-
-  // Crosshair axes
-  ctx.strokeStyle = "rgba(95, 205, 216, 0.08)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(cx, 16); ctx.lineTo(cx, h - 16);
-  ctx.moveTo(16, cy); ctx.lineTo(w - 16, cy);
-  ctx.stroke();
-
-  // Radar distance concentric rings
-  for (let r = 1; r <= Math.floor(maxRange); r += 1) {
-    ctx.strokeStyle = r === Math.floor(maxRange) ? "rgba(95, 205, 216, 0.22)" : "rgba(120, 140, 180, 0.12)";
-    ctx.setLineDash(r % 2 === 0 ? [3, 3] : []);
-    ctx.beginPath();
-    ctx.arc(cx, cy, r * scale, 0, Math.PI * 2);
-    ctx.stroke();
-
-    ctx.fillStyle = "rgba(154, 169, 173, 0.35)";
-    ctx.font = "9px ui-monospace, SFMono-Regular, Menlo, monospace";
-    ctx.textAlign = "left";
-    ctx.textBaseline = "bottom";
-    ctx.fillText(`${r}m`, cx + 4, cy - r * scale + 11);
-  }
-  ctx.setLineDash([]);
-
-  // Forward & lateral heading annotations
-  drawLidarHeading(ctx, w, h, cx, cy, maxRange * scale, "standby", Math.PI);
-
-  // Center robot indicator (pointing UP)
-  drawLidarCenterRobot(ctx, cx, cy);
-
-  // Center standby hint
-  ctx.fillStyle = "rgba(154, 169, 173, 0.45)";
-  ctx.font = "11px Inter, system-ui, sans-serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(t("Awaiting LiDAR scan..."), cx, cy + 32);
 }
 
 function scenePoint(x, y) {
@@ -4347,45 +4093,6 @@ function drawScene(canvas, scene) {
   drawScaleBar(ctx, w, h, scale);
 }
 
-async function perceptionPollLidar() {
-  const canvas = document.querySelector("[data-lidar-canvas]");
-  if (!canvas) return;
-  try {
-    const data = await perceptionFetch("lidar");
-    if (!data.ok || !data.scan) {
-      perceptionMeta("lidar", data.error || t("LiDAR data unavailable"));
-      perception.lastLidarScan = null;
-      drawLidarStandby(canvas);
-      return;
-    }
-    perception.lastLidarScan = data.scan;
-    drawLidar(canvas, data.scan);
-
-    // Synchronously update laser overlay on scene map if scene is active
-    if (perception.tiles.scene && perception.sceneLayers.lidar !== false && perception.lastScene) {
-      const sceneCanvas = document.querySelector("[data-scene-canvas]");
-      if (sceneCanvas) drawScene(sceneCanvas, perception.lastScene);
-    }
-    const ranges = data.scan.ranges || [];
-    let minDist = Infinity;
-    const rMin = Number(data.scan.range_min) || 0.01;
-    const rMax = Number(data.scan.range_max) || 100;
-    for (let i = 0; i < ranges.length; i += 1) {
-      const r = Number(ranges[i]);
-      if (Number.isFinite(r) && r >= rMin && r <= rMax && r < minDist) {
-        minDist = r;
-      }
-    }
-    const fovDeg = Math.round(Math.abs(((data.scan.angle_max || Math.PI / 2) - (data.scan.angle_min || -Math.PI / 2)) * (180 / Math.PI)));
-    const minPart = Number.isFinite(minDist) ? ` · ${t("min")} ${minDist.toFixed(2)}m` : "";
-    perceptionMeta("lidar", `${fovDeg}° · ${ranges.length} ${t("rays")}${minPart}`);
-  } catch (_) {
-    perceptionMeta("lidar", t("Offline"));
-    perception.lastLidarScan = null;
-    drawLidarStandby(canvas);
-  }
-}
-
 async function perceptionPollScene() {
   const canvas = document.querySelector("[data-scene-canvas]");
   if (!canvas) return;
@@ -4483,7 +4190,7 @@ function renderPerceptionStrip(tiles) {
   const strip = document.getElementById("perceptionSourceStrip");
   if (!strip) return;
   strip.textContent = "";
-  for (const id of ["camera", "depth", "scene"]) {
+  for (const id of PERCEPTION_TILE_IDS) {
     const chip = document.createElement("span");
     chip.className = `perception-source-chip ${tiles[id] ? "online" : "offline"}`;
     chip.textContent = id;
@@ -4494,7 +4201,7 @@ function renderPerceptionStrip(tiles) {
 function updatePerceptionEmptyDiagnostics(tiles) {
   const ep = document.getElementById("perceptionEmptyEndpoint");
   if (ep) ep.textContent = perceptionAtlas();
-  for (const id of ["camera", "depth", "scene"]) {
+  for (const id of PERCEPTION_TILE_IDS) {
     const card = document.querySelector(`.perception-channel-card[data-channel="${id}"]`);
     if (card) {
       const isOnline = !!tiles[id];
@@ -4555,6 +4262,7 @@ async function perceptionRefresh() {
     updatePerceptionEmptyDiagnostics(tiles);
 
     const activeCount = Object.values(tiles).filter(Boolean).length;
+    const totalCount = Object.keys(tiles).length || PERCEPTION_TILE_IDS.length;
     const healthBadge = document.getElementById("perceptionHealthBadge");
     const healthText = document.getElementById("perceptionHealthText");
     if (healthBadge) {
@@ -4562,7 +4270,7 @@ async function perceptionRefresh() {
       healthBadge.classList.toggle("offline", activeCount === 0);
     }
     if (healthText) {
-      healthText.textContent = activeCount === 4 ? t("All Streams Active") : `${activeCount}/4 ${t("Telemetry Active")}`;
+      healthText.textContent = activeCount === totalCount ? t("All Streams Active") : `${activeCount}/${totalCount} ${t("Telemetry Active")}`;
     }
 
     const grid = document.getElementById("perceptionGrid");
@@ -4579,7 +4287,7 @@ async function perceptionRefresh() {
       healthBadge.classList.add("offline");
     }
     if (healthText) {
-      healthText.textContent = `0/4 ${t("Offline")}`;
+      healthText.textContent = `0/${PERCEPTION_TILE_IDS.length} ${t("Offline")}`;
     }
     const grid = document.getElementById("perceptionGrid");
     if (grid) grid.hidden = true;
@@ -4707,59 +4415,6 @@ function bindSceneView() {
   }
 }
 
-function bindLidarView() {
-  const canvas = document.querySelector("[data-lidar-canvas]");
-  if (!canvas || canvas.dataset.lidarBound) return;
-  canvas.dataset.lidarBound = "1";
-
-  // Mouse wheel zoom
-  canvas.addEventListener("wheel", (event) => {
-    event.preventDefault();
-    const current = perception.lidarZoom || 1.0;
-    perception.lidarZoom = Math.min(6.0, Math.max(0.4, current * Math.exp(-event.deltaY * 0.0015)));
-    redrawPerceptionCanvases();
-  }, { passive: false });
-
-  // Double click reset
-  canvas.addEventListener("dblclick", () => {
-    perception.lidarZoom = 1.0;
-    perception.lidarPan = { x: 0, y: 0 };
-    redrawPerceptionCanvases();
-  });
-
-  // Pointer drag to pan
-  canvas.addEventListener("pointerdown", (event) => {
-    if (event.button !== 0) return;
-    event.preventDefault();
-    canvas.setPointerCapture(event.pointerId);
-    canvas.style.cursor = "grabbing";
-    canvas._panStart = {
-      x: event.clientX,
-      y: event.clientY,
-      panX: perception.lidarPan?.x || 0,
-      panY: perception.lidarPan?.y || 0,
-    };
-  });
-
-  canvas.addEventListener("pointermove", (event) => {
-    if (!canvas._panStart) return;
-    perception.lidarPan = {
-      x: canvas._panStart.panX + (event.clientX - canvas._panStart.x),
-      y: canvas._panStart.panY + (event.clientY - canvas._panStart.y),
-    };
-    redrawPerceptionCanvases();
-  });
-
-  const endPan = (event) => {
-    if (!canvas._panStart) return;
-    canvas._panStart = null;
-    if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
-    canvas.style.cursor = "";
-  };
-  canvas.addEventListener("pointerup", endPan);
-  canvas.addEventListener("pointercancel", endPan);
-}
-
 function bindPerceptionControls() {
   const pauseBtn = document.getElementById("perceptionPauseBtn");
   if (pauseBtn && !pauseBtn.dataset.pauseBound) {
@@ -4816,9 +4471,6 @@ function bindCameraSnapshot() {
           const img = document.querySelector("[data-depth-img]");
           if (img && img.classList.contains("loaded")) url = img.getAttribute("src") || img.src;
         }
-      } else if (tileId === "lidar") {
-        const canvas = document.querySelector("[data-lidar-canvas]");
-        if (canvas) url = canvas.toDataURL("image/png");
       } else if (tileId === "scene") {
         const canvas = document.querySelector("[data-scene-canvas]");
         if (canvas) url = canvas.toDataURL("image/png");
@@ -4918,25 +4570,12 @@ function bindDepthHover() {
   });
 }
 
-function bindLidarReset() {
-  const btn = document.querySelector('.perception-tile[data-tile="lidar"] button[data-action="reset-lidar"]');
-  if (!btn || btn.dataset.resetBound) return;
-  btn.dataset.resetBound = "1";
-  btn.addEventListener("click", () => {
-    perception.lidarZoom = 1.0;
-    perception.lidarPan = { x: 0, y: 0 };
-    redrawPerceptionCanvases();
-  });
-}
-
 function startPerception() {
   bindPerceptionRetry();
   bindPerceptionControls();
   bindCameraSnapshot();
   bindDepthColormap();
   bindDepthHover();
-  bindLidarReset();
-  bindLidarView();
   bindSceneLayers();
   bindSceneView();
   redrawPerceptionCanvases();
@@ -4953,13 +4592,7 @@ function stopPerception() {
 }
 
 function redrawPerceptionCanvases() {
-  const lidarCanvas = document.querySelector("[data-lidar-canvas]");
   const sceneCanvas = document.querySelector("[data-scene-canvas]");
-
-  if (lidarCanvas) {
-    if (perception.lastLidarScan) drawLidar(lidarCanvas, perception.lastLidarScan);
-    else drawLidarStandby(lidarCanvas);
-  }
 
   if (sceneCanvas) {
     if (perception.lastScene) drawScene(sceneCanvas, perception.lastScene);

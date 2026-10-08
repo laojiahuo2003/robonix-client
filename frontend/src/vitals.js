@@ -15,6 +15,7 @@ import {
   CircleGauge,
   Cpu,
   Disc3,
+  Maximize2,
   Radio,
   RefreshCw,
   ScanLine,
@@ -1511,22 +1512,53 @@ class VitalsDashboard {
       row.className = "vitals-component-row";
       row.classList.toggle("active", component.id === this.selectedComponentId);
       row.style.setProperty("--component-depth", String(Math.max(0, component.id.split("/").length - 1)));
-      row.title = component.id;
+      // The compute node opens its telemetry modal instead of the inspector.
+      const isComputeNode = component.localId === "compute_node" || component.type === "computer";
+      if (isComputeNode) row.classList.add("vitals-component-row-action");
+      row.title = isComputeNode ? t("Compute node telemetry from Vitals") : component.id;
+      if (isComputeNode) row.setAttribute("aria-haspopup", "dialog");
       const iconRoot = document.createElement("span");
       iconRoot.className = "vitals-component-icon";
       iconRoot.appendChild(icon(componentIcon(component.type), 15));
       const copy = document.createElement("span");
       copy.className = "vitals-component-copy";
       const label = document.createElement("strong");
-      label.textContent = component.label || component.localId || component.id;
+      const labelText = document.createElement("span");
+      labelText.className = "vitals-component-label";
+      labelText.textContent = component.label || component.localId || component.id;
+      label.appendChild(labelText);
+      if (isComputeNode) {
+        // The row opens a telemetry modal instead of the inspector: say so.
+        const badge = document.createElement("span");
+        badge.className = "vitals-component-badge";
+        badge.textContent = t("Telemetry");
+        label.appendChild(badge);
+      }
       const type = document.createElement("span");
       type.textContent = component.type || t("component");
       copy.append(label, type);
       const status = document.createElement("span");
       status.className = `vitals-status-dot ${safeHealth(healthMap.get(component.id))}`;
       status.title = t(safeHealth(healthMap.get(component.id)));
-      row.append(iconRoot, copy, status);
-      row.addEventListener("click", () => this.selectComponent(component.id));
+      const trailing = document.createElement("span");
+      trailing.className = "vitals-component-trailing";
+      if (isComputeNode) {
+        // Expand icon marks the row as "opens a window". It sits left of the
+        // status dot so the dot stays last and lines up with every other row.
+        const expand = document.createElement("span");
+        expand.className = "vitals-component-expand";
+        expand.appendChild(icon(Maximize2, 13));
+        trailing.appendChild(expand);
+      }
+      trailing.appendChild(status);
+      row.append(iconRoot, copy, trailing);
+      row.addEventListener("click", () => {
+        if (isComputeNode && window.__robonixComputeNode) {
+          window.__robonixComputeNode.open();
+          return;
+        }
+        this.selectComponent(component.id);
+      });
       root?.appendChild(row);
     });
   }

@@ -1,11 +1,11 @@
-/// Compute Node telemetry panel (Route B).
+/// Compute Node telemetry panel.
 ///
-/// Renders the `linux_health` primitive's raw telemetry (CPU temperature,
+/// Renders the compute-node metrics surfaced through Vitals (CPU temperature,
 /// input voltage, load current) as three KPI cards and three streaming line
 /// charts, driven by a dedicated `/ws/health` WebSocket. The panel only
-/// appears while the deployment actually streams the primitive; when it is
-/// absent the `/ws/health` source reports `unavailable` and the panel stays
-/// hidden, restoring the original UI.
+/// appears while the deployment streams those signals; when they are absent
+/// the `/ws/health` source reports `unavailable` and the panel stays hidden,
+/// restoring the original UI.
 import {
   Cpu,
   Zap,
@@ -90,9 +90,11 @@ let lastSource = "connecting";
 class ComputeNodePanel {
   constructor(root) {
     this.root = root;
+    // Telemetry lives in a modal opened from the compute-node row in the
+    // Vitals component list, so the stream is kept warm even while closed.
+    this.backdrop = root.closest(".modal-backdrop");
     this.socket = null;
     this.reconnectTimer = 0;
-    this.stubTimer = 0;
     this.samples = [];
     this.badgeValue = byId("computeNodeSource") || root.querySelector("[data-compute-source]");
     this.updatedAt = byId("computeNodeUpdated") || root.querySelector("[data-compute-updated]");
@@ -100,12 +102,18 @@ class ComputeNodePanel {
 
     const reconnect = byId("computeNodeReconnect");
     if (reconnect) reconnect.addEventListener("click", () => this.connect(true));
-
-    window.addEventListener("robonix:settings", () => {
-      if (this.root.offsetWidth || this.root.getBoundingClientRect().width) this.connect(true);
+    const closeButton = byId("computeNodeModalClose");
+    if (closeButton) closeButton.addEventListener("click", () => this.close());
+    this.backdrop?.addEventListener("click", (event) => {
+      if (event.target === this.backdrop) this.close();
     });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && this.isOpen()) this.close();
+    });
+
+    window.addEventListener("robonix:settings", () => this.connect(true));
     window.addEventListener("robonix:i18n", () => this.renderLabels());
-    window.addEventListener("beforeunload", () => this.disconnect(true));
+    window.addEventListener("beforeunload", () => this.disconnect());
 
     METRICS.forEach((metric) => {
       const span = byId(metric.spanId);
@@ -116,7 +124,6 @@ class ComputeNodePanel {
 
     this.renderLabels();
     this.setSource(lastSource, "");
-    this.showPanel(false);
     this.connect();
   }
 
@@ -138,29 +145,49 @@ class ComputeNodePanel {
   setSource(source, error) {
     lastSource = source;
     if (this.badgeValue) {
-      this.badgeValue.className =
-        `health-label ${source === "primitive" ? "ok" : source === "dev-stub" ? "idle" : "stale"}`;
+      this.badgeValue.className = `health-label ${source === "vitals" ? "ok" : "stale"}`;
       this.badgeValue.innerHTML = "";
       const key =
-        source === "primitive" ? t("Live primitive") :
-        source === "dev-stub" ? t("Dev stub") :
+        source === "vitals" ? t("Live vitals") :
         source === "unavailable" ? t("No model") : t("Connecting");
       this.badgeValue.append(document.createTextNode(key));
       this.badgeValue.title = error || "";
     }
     if (this.statusDot) {
-      this.statusDot.className = `vitals-status-dot ${source === "primitive" ? "ok" : source === "dev-stub" ? "idle" : "stale"}`;
+      this.statusDot.className = `vitals-status-dot ${source === "vitals" ? "ok" : "stale"}`;
     }
-    // Without the linux_health primitive the panel has no live source: keep it
-    // out of the UI (restoring the original layout) instead of showing a stub.
-    if (source === "unavailable") this.showPanel(false);
   }
 
-  showPanel(visible) {
-    if (this.root) {
-      this.root.style.display = visible ? "" : "none";
-      this.panelVisible = visible;
-    }
+  isOpen() {
+    return Boolean(this.backdrop) && !this.backdrop.hidden;
+  }
+
+  open() {
+    if (!this.backdrop) return;
+    this.backdrop.hidden = false;
+    this.updateKpis();
+    // Canvases measure 0x0 while the modal is closed: size and paint them now.
+    window.requestAnimationFrame(() => this.resizeCanvases());
+  }
+
+  close() {
+    if (this.backdrop) this.backdrop.hidden = true;
+  }
+
+  resizeCanvases() {
+    METRICS.forEach((metric) => {
+      const canvas = byId(metric.canvasId);
+      if (!canvas) return;
+      this.setupCanvas(canvas);
+      const parent = canvas.parentElement;
+      if (!parent) return;
+      const dpr = canvas.__dpr || 1;
+      const rect = parent.getBoundingClientRect();
+      canvas.width = Math.max(2, Math.floor(rect.width * dpr));
+      canvas.height = Math.max(2, Math.floor(rect.height * dpr));
+      canvas.getContext("2d").setTransform(dpr, 0, 0, dpr, 0, 0);
+    });
+    this.draw();
   }
 
   updateKpis() {
@@ -196,7 +223,6 @@ class ComputeNodePanel {
       window.clearTimeout(this.reconnectTimer);
       this.reconnectTimer = 0;
     }
-    this.stopStub();
     const oldSocket = this.socket;
     this.socket = null;
     oldSocket?.close(1000, "Compute-node reconnect");
@@ -210,24 +236,24 @@ class ComputeNodePanel {
         const event = JSON.parse(message.data);
         if (event.type === "source") {
           if (event.source === "unavailable") {
-            // This deployment has no linux_health primitive: keep the panel
-            // hidden and stop retrying (matches the original UI).
-            this.showPanel(false);
+            // This deployment surfaces no compute-node signals: the modal keeps
+            // showing "No model" and we stop retrying.
             this.setSource("unavailable", event.error || "");
             if (this.socket === socket) this.socket = null;
-            socket.close(1000, "No health primitive");
+            socket.close(1000, "No compute-node signals");
             return;
           }
           this.setSource(event.source, event.error || "");
         } else if (event.type === "sample") {
-          if (event.source === "primitive") this.showPanel(true);
           this.setSource(event.source);
           this.pushSample(event.data);
         } else if (event.type === "error") {
-          this.showPanel(false);
-          this.setSource("unavailable", event.error || "");
+          // A transport-level error is transient: keep the panel as-is and
+          // reconnect rather than hiding it for good.
+          this.setSource("stale", event.error || "");
           if (this.socket === socket) this.socket = null;
-          socket.close(1000, "Health error");
+          socket.close();
+          this.scheduleRetry();
         }
       } catch (error) {
         this.scheduleRetry();
@@ -265,7 +291,7 @@ class ComputeNodePanel {
       this.samples.shift();
     }
     this.updateKpis();
-    this.draw();
+    if (this.isOpen()) this.draw();
   }
 
   setupCanvas(canvas) {
@@ -320,12 +346,11 @@ class ComputeNodePanel {
         context.fillText(`${labelValue.toFixed(metric.decimals > 0 ? metric.decimals - 1 : 0)}`, 2, y + 7);
       }
 
-      const points = this.samples
-        .filter((s) => s[metric.key] != null)
-        .map((s, index) => ({
-          x: padL + (index / Math.max(1, this.samples.length - 1)) * plotW,
-          y: padT + (1 - (s[metric.key] - metric.min) / (metric.max - metric.min)) * plotH,
-        }));
+      const values = this.samples.filter((s) => s[metric.key] != null);
+      const points = values.map((s, index) => ({
+        x: padL + (index / Math.max(1, values.length - 1)) * plotW,
+        y: padT + (1 - (s[metric.key] - metric.min) / (metric.max - metric.min)) * plotH,
+      }));
       if (points.length > 1) {
         context.strokeStyle = color;
         context.lineWidth = 1.6;
@@ -345,14 +370,7 @@ class ComputeNodePanel {
     });
   }
 
-  stopStub() {
-    if (this.stubTimer) {
-      window.clearInterval(this.stubTimer);
-      this.stubTimer = 0;
-    }
-  }
-
-  disconnect(keepStub = false) {
+  disconnect() {
     if (this.reconnectTimer) {
       window.clearTimeout(this.reconnectTimer);
       this.reconnectTimer = 0;
@@ -361,7 +379,6 @@ class ComputeNodePanel {
       this.socket.close(1000, "Compute-node page closed");
       this.socket = null;
     }
-    if (!keepStub) this.stopStub();
   }
 }
 

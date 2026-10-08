@@ -3099,6 +3099,10 @@ select:focus {
 }
 
 .vitals-component-copy strong {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 12px;
   font-weight: 650;
 }
@@ -3106,6 +3110,43 @@ select:focus {
 .vitals-component-copy span {
   color: var(--dim);
   font-size: 10px;
+}
+
+/* Label text keeps the <strong> styling now that a badge may follow it. */
+.vitals-component-copy .vitals-component-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+/* Marks a row (the compute node) that opens a modal instead of the inspector. */
+.vitals-component-copy .vitals-component-badge {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border: 1px solid rgba(95, 205, 216, 0.42);
+  border-radius: 999px;
+  background: rgba(95, 205, 216, 0.14);
+  color: #9fe3ea;
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+
+.vitals-component-trailing {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.vitals-component-expand {
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  color: var(--muted);
 }
 
 .vitals-stage {
@@ -4060,15 +4101,6 @@ select:focus {
   gap: 14px;
 }
 
-.perception-eyebrow {
-  display: block;
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--dim);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-
 .perception-title-line h2 {
   margin: 0;
   font-size: 20px;
@@ -4625,13 +4657,11 @@ select:focus {
   display: block;
 }
 
-.perception-canvas[data-scene-canvas],
-.perception-canvas[data-lidar-canvas] {
+.perception-canvas[data-scene-canvas] {
   cursor: grab;
   touch-action: none;
 }
 
-.perception-canvas[data-lidar-canvas]:active,
 .perception-canvas[data-scene-canvas]:active {
   cursor: grabbing;
 }
@@ -4970,7 +5000,7 @@ select:focus {
   }
 }
 
-/* ── Compute Node panel (linux_health primitive telemetry) ────────────────── */
+/* ── Compute Node panel (telemetry surfaced through Vitals) ────────────────── */
 
 .compute-node {
   display: grid;
@@ -4980,6 +5010,32 @@ select:focus {
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--panel);
+}
+
+/* Opened as a modal from the compute-node row in the component list. */
+.compute-node-modal {
+  width: min(92vw, 760px);
+  max-height: 84vh;
+  margin-top: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-color: #355263;
+  background: #091216;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.58);
+}
+
+/* Hint that this component row opens a modal instead of the inspector. */
+.vitals-component-row-action {
+  background: rgba(95, 205, 216, 0.12);
+}
+
+.vitals-component-row-action:hover {
+  background: rgba(95, 205, 216, 0.2);
+}
+
+.vitals-component-row-action:hover .vitals-component-expand {
+  color: #9fe3ea;
+  background: rgba(95, 205, 216, 0.16);
 }
 
 .compute-node-header {

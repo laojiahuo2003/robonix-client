@@ -1,14 +1,12 @@
-"""Compute-node telemetry bridge (Route B).
+"""Compute-node telemetry panel, driven by the Vitals snapshot stream.
 
-Connects a browser panel DIRECTLY to the `linux_health` primitive's own
-`robonix/primitive/health/stream` contract (resolved through Atlas), bypassing
-the frozen Soma/Vitals chain. When the deploy does NOT include the primitive,
-the adapter reports `source=unavailable` and stops, so the browser keeps the
-Compute Node panel hidden - restoring the original UI. The panel only appears
-once a frame is streamed from the real primitive.
-
-Only the fake-data source was changed on the backend side; nothing here wires
-into Soma or Vitals.
+Reads the shared `robonix/system/vitals/stream` contract (the same one behind
+the Vitals page) and projects the compute-node metrics - CPU temperature and
+input-power voltage/current - into the flat shape the browser panel renders.
+When the stream is unreachable, or a snapshot carries no compute-node signals
+(e.g. a deployment whose Soma model omits the component), the adapter reports
+`source=unavailable` and stops, so the browser keeps the Compute Node panel
+hidden.
 """
 
 from __future__ import annotations
@@ -20,26 +18,26 @@ from typing import Any, AsyncIterator
 import grpc
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from .proto import health_pb2
+from .proto import vitals_client_pb2
 from .transport import ClientSettings, discover_endpoint, grpc_channel
+from .vitals_transport import CONTRACT_VITALS_STREAM, VITALS_STREAM_PATH
 
 router = APIRouter()
 
-CONTRACT_HEALTH_STREAM = "robonix/primitive/health/stream"
-CONTRACT_HEALTH_STATE = "robonix/primitive/health/state"
+# Signal names Vitals synthesizes for the compute-node metrics: the Soma model
+# declares `body/compute_node/{cpu,input_power}` and Vitals flattens each metric
+# into `{component_id}/{signal}`.
+CPU_TEMP_SIGNAL = "body/compute_node/cpu/temperature"
+INPUT_VOLTAGE_SIGNAL = "body/compute_node/input_power/voltage"
+INPUT_CURRENT_SIGNAL = "body/compute_node/input_power/current"
 
-HEALTH_STREAM_PATH = (
-    "/robonix.contracts.RobonixPrimitiveHealthStream/StreamHealthState"
-)
-HEALTH_STATE_PATH = "/robonix.contracts.RobonixPrimitiveHealthState/GetHealthState"
-
-# Reading names emitted by the deployment manifest's linux_health config.
-CPU_READING = "body/compute_node/cpu"
-POWER_READING = "body/compute_node/input_power"
-# The fake-sys linux_health provider that streams compute_node telemetry. Other
-# deployments (e.g. tiago_health) register the SAME contract id, so hint Atlas
-# to the one that owns the compute node readings.
-HEALTH_PROVIDER = "linux_health"
+# Signals the panel renders. Vitals delivers *partial* snapshots -- a single
+# frame may carry only the physical-body readings while the compute node's
+# arrive in another -- so one snapshot without these says nothing about the
+# deployment. Only a sustained absence (over this grace window) means the Soma
+# model genuinely has no compute-node component.
+COMPUTE_NODE_SIGNALS = ("cpuTemp", "voltage", "current")
+COMPUTE_NODE_GRACE_S = 8.0
 
 
 def _error_text(exc: BaseException) -> str:
@@ -49,7 +47,7 @@ def _error_text(exc: BaseException) -> str:
 
 
 def _positive(value: float) -> float | None:
-    """Return the value, or None when the primitive's -1 'unknown' sentinel."""
+    """Return the value, or None for Vitals' -1 'unknown' sentinel."""
     try:
         number = float(value)
     except (TypeError, ValueError):
@@ -57,79 +55,81 @@ def _positive(value: float) -> float | None:
     return number if number >= 0 else None
 
 
-def health_state_to_sample(state: health_pb2.HealthState) -> dict[str, Any]:
-    """Project one HealthState frame into the browser's flat sample shape."""
-    readings = [
-        {
-            "name": reading.name,
-            "tempC": _positive(reading.temp_c),
-            "voltage": _positive(reading.voltage),
-            "currentA": _positive(reading.current_a),
-            "batteryPercent": _positive(reading.battery_percent),
-        }
-        for reading in state.readings
-    ]
-
-    def pick(reading_name: str, key: str) -> float | None:
-        for reading in readings:
-            if reading["name"] == reading_name and reading[key] is not None:
-                return reading[key]
-        return None
-
-    cpu_temp = pick(CPU_READING, "tempC")
-    voltage = pick(POWER_READING, "voltage")
-    if voltage is None and _positive(state.voltage) is not None:
-        voltage = float(state.voltage)
-    current_a = pick(POWER_READING, "currentA")
-
+def compute_node_sample(snapshot: vitals_client_pb2.VitalsSnapshot) -> dict[str, Any]:
+    """Project one Vitals snapshot into the browser's flat sample shape."""
+    by_name = {entry.name: entry.value for entry in snapshot.components}
     return {
         "ts": int(time.time() * 1000),
-        "cpuTemp": cpu_temp,
-        "voltage": voltage,
-        "current": current_a,
-        "raw": readings,
+        "cpuTemp": _positive(by_name.get(CPU_TEMP_SIGNAL)),
+        "voltage": _positive(by_name.get(INPUT_VOLTAGE_SIGNAL)),
+        "current": _positive(by_name.get(INPUT_CURRENT_SIGNAL)),
     }
 
 
-async def _stream_primitive(
+async def _stream_vitals(
     settings: ClientSettings,
 ) -> AsyncIterator[dict[str, Any]]:
-    """Relay live HealthState frames from the linux_health primitive."""
-    endpoint = await discover_endpoint(
-        settings.atlas_endpoint, CONTRACT_HEALTH_STREAM, provider_hint=HEALTH_PROVIDER
-    )
+    """Relay live compute-node readings from the Vitals snapshot stream."""
+    endpoint = await discover_endpoint(settings.atlas_endpoint, CONTRACT_VITALS_STREAM)
     async with grpc_channel(endpoint) as channel:
         call = channel.unary_stream(
-            HEALTH_STREAM_PATH,
-            request_serializer=health_pb2.StreamHealthState_Request.SerializeToString,
-            response_deserializer=health_pb2.HealthState.FromString,
+            VITALS_STREAM_PATH,
+            request_serializer=vitals_client_pb2.StreamVitals_Request.SerializeToString,
+            response_deserializer=vitals_client_pb2.VitalsSnapshot.FromString,
         )
-        async for state in call(health_pb2.StreamHealthState_Request()):
+        async for snapshot in call(vitals_client_pb2.StreamVitals_Request()):
             yield {
                 "type": "sample",
-                "source": "primitive",
-                "data": health_state_to_sample(state),
+                "source": "vitals",
+                "data": compute_node_sample(snapshot),
             }
 
 
 async def stream_health_events(settings: ClientSettings) -> AsyncIterator[dict[str, Any]]:
-    """Yield browser-ready events. Reports `unavailable` (and stops) when the
-    deployment does not include the linux_health primitive, so the browser
-    keeps the Compute Node panel hidden."""
-    yield {"type": "accepted", "contract": CONTRACT_HEALTH_STREAM}
-    try:
-        async for event in _stream_primitive(settings):
-            yield event
-    except asyncio.CancelledError:
-        raise
-    except Exception as exc:
-        # Primitive not discovered (or unreachable) in this deployment -> tell the
-        # browser the panel has no live source; it stays hidden like the original UI.
-        yield {
-            "type": "source",
-            "source": "unavailable",
-            "error": f"linux_health primitive unavailable: {_error_text(exc)}",
-        }
+    """Yield browser-ready events.
+
+    Snapshots are merged across frames: a compute-node signal seen once is
+    carried forward, so the panel keeps showing all three metrics even though
+    Vitals delivers them in separate partial snapshots. Only when *no* signal
+    turns up within the grace window does the deployment count as lacking the
+    component, and the panel is told to stay hidden. Transport failures are
+    retried with backoff rather than hiding the panel for good.
+    """
+    yield {"type": "accepted", "contract": CONTRACT_VITALS_STREAM}
+    retry_seconds = 1.0
+    while True:
+        try:
+            latest: dict[str, Any] = {key: None for key in COMPUTE_NODE_SIGNALS}
+            deadline = time.monotonic() + COMPUTE_NODE_GRACE_S
+            async for event in _stream_vitals(settings):
+                sample = event["data"]
+                for key in COMPUTE_NODE_SIGNALS:
+                    if sample[key] is not None:
+                        latest[key] = sample[key]
+                if any(latest[key] is not None for key in COMPUTE_NODE_SIGNALS):
+                    retry_seconds = 1.0
+                    yield {
+                        "type": "sample",
+                        "source": "vitals",
+                        "data": {"ts": sample["ts"], **latest},
+                    }
+                elif time.monotonic() > deadline:
+                    yield {
+                        "type": "source",
+                        "source": "unavailable",
+                        "error": "Vitals stream carries no compute-node signals",
+                    }
+                    return
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            yield {
+                "type": "source",
+                "source": "connecting",
+                "error": f"Vitals stream unavailable: {_error_text(exc)}",
+            }
+        await asyncio.sleep(retry_seconds)
+        retry_seconds = min(retry_seconds * 2.0, 15.0)
 
 
 @router.websocket("/ws/health")
