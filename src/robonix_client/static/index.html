@@ -4,12 +4,15 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Robonix Client</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20261009c" />
+    <link rel="stylesheet" href="/static/styles.css?v=20261009d" />
   </head>
   <body>
     <div class="app-shell">
       <aside class="nav-rail">
-        <div class="brand" data-i18n="Robonix Client">Robonix Client</div>
+        <div class="brand">
+          <div class="brand-title">Robonix</div>
+          <div class="brand-sub" data-i18n="Client">Client</div>
+        </div>
         <nav class="nav-list" aria-label="Workspace" data-i18n-aria-label="Workspace">
           <button class="nav-item active" type="button" data-page="dashboard"><span data-i18n="Chat">Chat</span></button>
           <button class="nav-item" type="button" data-page="perception"><span data-i18n="Perception">Perception</span></button>
@@ -31,18 +34,22 @@
             <input id="sessionTitleInput" autocomplete="off" placeholder="Untitled chat" data-i18n-placeholder="Untitled chat" title="Name of this session. Edit to rename it; New session creates one under this name." data-i18n-title="Name of this session. Edit to rename it; New session creates one under this name." />
           </div>
           <button class="new-session-button" type="button" id="newSessionAction" title="Start a fresh conversation under the name on the left. The robot's planner keeps history per session, so a new session clears it and stops resending old turns to the model." data-i18n-title="Start a fresh conversation under the name on the left. The robot's planner keeps history per session, so a new session clears it and stops resending old turns to the model."><span class="btn-icon" aria-hidden="true">＋</span><span class="btn-label" data-i18n="New session">New session</span></button>
-          <label class="select-field endpoint">
-            <span data-i18n="Robot Host">Robot Host</span>
-            <input id="robotHost" autocomplete="off" placeholder="100.x.y.z" />
-          </label>
-          <label class="select-field">
-            <span data-i18n="Atlas Port">Atlas Port</span>
-            <input id="atlasPort" autocomplete="off" inputmode="numeric" placeholder="50051" />
-          </label>
-          <label class="select-field">
-            <span data-i18n="User">User</span>
-            <input id="userId" autocomplete="off" placeholder="voice:client" />
-          </label>
+          
+          <input id="robotHost" type="hidden" />
+          <input id="atlasPort" type="hidden" />
+          <input id="userId" type="hidden" />
+          
+          <button class="endpoint-badge" id="endpointBadge" type="button" data-page-link="settings" title="Robot Atlas Endpoint. Click to edit in Settings." data-i18n-title="Robot Atlas Endpoint. Click to edit in Settings.">
+            <svg class="endpoint-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+            <span class="endpoint-label" data-i18n="Atlas:">Atlas:</span>
+            <span class="endpoint-val" id="atlasEndpointDisplay">127.0.0.1:50051</span>
+          </button>
+          
+          <button class="endpoint-badge user-badge" id="userBadge" type="button" data-page-link="settings" title="Current Operator. Click to edit in Settings." data-i18n-title="Current Operator. Click to edit in Settings.">
+            <svg class="endpoint-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            <span class="endpoint-val" id="userDisplay">voice:client</span>
+          </button>
+
           <button class="status-chip" id="refreshSystem" type="button">
             <span class="dot"></span>
             <span id="connectionState" data-i18n="offline">offline</span>
@@ -74,10 +81,26 @@
             <form class="composer" id="composer">
               <div class="composer-row">
                 <textarea id="taskInput" rows="1" placeholder="Type a message..." data-i18n-placeholder="Type a message..."></textarea>
-                <button class="tool-button voice-inline" type="button" data-page-action="voice-start" title="Start voice recording (F2)" data-i18n-title="Start voice recording (F2)"><span class="btn-icon" aria-hidden="true">🎙</span><span class="btn-label" data-i18n="Start recording">Start recording</span><kbd class="btn-key">F2</kbd></button>
-                <button class="tool-button finish-button" type="button" id="finishVoiceButton" title="Stop recording and send what you have said so far (F2). Does not cancel the task." data-i18n-title="Stop recording and send what you have said so far (F2). Does not cancel the task." hidden><span class="btn-icon" aria-hidden="true">⏹</span><span class="btn-label" data-i18n="Stop recording">Stop recording</span><kbd class="btn-key">F2</kbd></button>
-                <button class="danger-button stop-button" type="button" id="stopButton" title="Emergency stop: cancels every running task and any robot motion it started. Does not stop voice recording." data-i18n-title="Emergency stop: cancels every running task and any robot motion it started. Does not stop voice recording." hidden><span class="btn-icon" aria-hidden="true">⛔</span><span class="btn-label" data-i18n="Abort all tasks">Abort all tasks</span></button>
-                <button class="send-button" type="submit" id="sendButton" title="Send task (Enter)" data-i18n-title="Send task (Enter)"><span class="btn-label" data-i18n="Send">Send</span><kbd class="btn-key">Enter</kbd></button>
+                <button class="tool-button voice-inline" type="button" data-page-action="voice-start" title="Start voice recording (F2)" data-i18n-title="Start voice recording (F2)">
+                  <svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg>
+                  <span class="btn-label" data-i18n="Start recording">Start recording</span>
+                  <kbd class="btn-key">F2</kbd>
+                </button>
+                <button class="tool-button finish-button" type="button" id="finishVoiceButton" title="Stop recording and send what you have said so far (F2). Does not cancel the task." data-i18n-title="Stop recording and send what you have said so far (F2). Does not cancel the task." hidden>
+                  <svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+                  <span class="btn-label" data-i18n="Stop recording">Stop recording</span>
+                  <kbd class="btn-key">F2</kbd>
+                </button>
+                <button class="danger-button stop-button" type="button" id="stopButton" title="Emergency stop: cancels every running task and any robot motion it started. Does not stop voice recording." data-i18n-title="Emergency stop: cancels every running task and any robot motion it started. Does not stop voice recording." hidden>
+                  <svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86 7.86 2"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                  <span class="btn-label" data-i18n="Abort all tasks">Abort all tasks</span>
+                </button>
+                <button class="send-button" type="submit" id="sendButton" title="Send task (Enter)" data-i18n-title="Send task (Enter)">
+                  <svg class="btn-icon send-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                  <svg class="btn-icon steer-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:none;"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
+                  <span class="btn-label" data-i18n="Send">Send</span>
+                  <kbd class="btn-key">Enter</kbd>
+                </button>
               </div>
             </form>
             </section>
@@ -505,6 +528,7 @@
                 </div>
                 <footer>
                   <button class="secondary-button" id="vitalsWarningDismiss" type="button" data-i18n="Dismiss">Dismiss</button>
+                  <button class="secondary-button" id="vitalsWarningDismissAll" type="button" data-i18n="Dismiss all">Dismiss all</button>
                   <button class="primary-button" id="vitalsWarningInspect" type="button" data-i18n="Inspect">Inspect</button>
                 </footer>
               </section>
@@ -779,8 +803,8 @@
       </section>
     </div>
 
-    <script src="/static/i18n.js?v=20261009c"></script>
-    <script src="/static/app.js?v=20260919c"></script>
-    <script src="/static/vitals.bundle.js?v=20261009c"></script>
+    <script src="/static/i18n.js?v=20261009d"></script>
+    <script src="/static/app.js?v=20261009d"></script>
+    <script src="/static/vitals.bundle.js?v=20261009d"></script>
   </body>
 </html>

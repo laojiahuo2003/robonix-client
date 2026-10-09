@@ -327,6 +327,10 @@ function bindSettings() {
   if (maybe("enrollUserId")) $("enrollUserId").value = state.settings.enrollUserId || "";
   if (maybe("enrollUserName")) $("enrollUserName").value = state.settings.enrollUserName || "";
   if (state.sessionTitle && maybe("promptTitle")) $("promptTitle").textContent = state.sessionTitle;
+  const endpointEl = maybe("atlasEndpointDisplay");
+  if (endpointEl) endpointEl.textContent = `${state.settings.robotHost || "127.0.0.1"}:${state.settings.atlasPort || DEFAULT_ATLAS_PORT}`;
+  const userEl = maybe("userDisplay");
+  if (userEl) userEl.textContent = state.settings.userId || "voice:client";
   renderSessionChip();
 
   [
@@ -368,6 +372,10 @@ async function syncConnectionSettings(fromSettings = false, persist = false) {
   if (maybe("settingsUserId") && maybe(userSource)) $("settingsUserId").value = $(userSource).value.trim();
   if (maybe("recordSeconds") && maybe(secondsSource)) $("recordSeconds").value = $(secondsSource).value;
   if (maybe("settingsRecordSeconds") && maybe(secondsSource)) $("settingsRecordSeconds").value = $(secondsSource).value;
+  const syncEndpoint = maybe("atlasEndpointDisplay");
+  if (syncEndpoint) syncEndpoint.textContent = `${host || "127.0.0.1"}:${port || DEFAULT_ATLAS_PORT}`;
+  const syncUser = maybe("userDisplay");
+  if (syncUser) syncUser.textContent = (maybe(userSource) ? $(userSource).value.trim() : "") || "voice:client";
   state.settings = collectSettings();
   saveSettings();
   window.dispatchEvent(new CustomEvent("robonix:settings"));
@@ -1020,7 +1028,13 @@ function startVoice() {
 
 function wireStream(socket, done, voiceSocket = null) {
   socket.onmessage = (event) => {
-    const payload = JSON.parse(event.data);
+    let payload;
+    try {
+      payload = JSON.parse(event.data);
+    } catch (err) {
+      console.warn("robonix: malformed websocket payload", err);
+      return;
+    }
     if (payload.type === "pilot_event") handlePilotEvent(payload.event);
     if (payload.type === "voice_event") handleVoiceEvent(payload.event, voiceSocket);
     if (payload.type === "accepted") addStatusLine(t("Connected; waiting for Robonix events."));
@@ -1240,14 +1254,46 @@ function announcePlan(plan) {
   if (msg) msg.planRound = round;
 }
 
+// Streamed chunks are persisted on a short delay: writing localStorage on every
+// chunk is wasteful, but never writing it loses the reply already on screen
+// when the socket drops or the page is reloaded mid-stream.
+let agentPersistTimer = 0;
+const AGENT_PERSIST_DELAY_MS = 500;
+
+function scheduleAgentPersist() {
+  if (agentPersistTimer) window.clearTimeout(agentPersistTimer);
+  agentPersistTimer = window.setTimeout(() => {
+    agentPersistTimer = 0;
+    persistCurrentConversation();
+  }, AGENT_PERSIST_DELAY_MS);
+}
+
 function appendAgent(text) {
   if (!state.activeAgentId) {
     state.activeAgentId = addMessage("agent", "", "Robonix");
   }
   const msg = state.messages.find((item) => item.id === state.activeAgentId);
   if (msg) msg.text += text;
-  renderMessages();
-  persistCurrentConversation();
+  scheduleAgentPersist();
+
+  const root = $("messages");
+  if (!root) return;
+  const existingEl = root.querySelector(`[data-message-id="${state.activeAgentId}"]`);
+  if (!existingEl) {
+    renderMessages();
+    return;
+  }
+  let body = existingEl.querySelector(".agent-markdown-body");
+  if (!body) {
+    renderMessages();
+    return;
+  }
+  const isNearBottom = root.scrollHeight - root.scrollTop - root.clientHeight < 80;
+  clear(body);
+  appendAgentMarkdown(body, msg);
+  if (isNearBottom) {
+    root.scrollTop = root.scrollHeight;
+  }
 }
 
 function finalizeAgent(text) {
@@ -1478,6 +1524,7 @@ function renderMessages() {
   state.messages.forEach((message) => {
     const el = document.createElement("div");
     el.className = `message ${message.role}`;
+    el.dataset.messageId = message.id;
     if (message.meta) {
       const meta = document.createElement("span");
       meta.className = "meta";
@@ -1485,7 +1532,10 @@ function renderMessages() {
       el.appendChild(meta);
     }
     if (message.role === "agent") {
-      appendAgentMarkdown(el, message);
+      const body = document.createElement("div");
+      body.className = "agent-markdown-body";
+      appendAgentMarkdown(body, message);
+      el.appendChild(body);
     } else {
       el.appendChild(document.createTextNode(message.text));
     }
@@ -3238,6 +3288,10 @@ function applyVoiceUser(rawUserId) {
   $("userId").value = `voice:${id}`;
   state.settings.userId = `voice:${id}`;
   saveSettings();
+  // Enrolment changes the operator outside of the settings form, so refresh the
+  // header badge here or it keeps showing the previous user.
+  const userEl = maybe("userDisplay");
+  if (userEl) userEl.textContent = state.settings.userId;
 }
 
 function normalizeVoiceId(rawUserId) {
@@ -3287,10 +3341,18 @@ function setButtonLabel(node, text) {
 
 function setBusy(value) {
   state.busy = value;
-  $("sendButton").classList.toggle("busy", value);
-  setButtonLabel($("sendButton"), t("Send"));
-  $("sendButton").title = value ? t("Send to the running task (Enter)") : t("Send task (Enter)");
-  $("stopButton").hidden = !value;
+  const sendBtn = maybe("sendButton");
+  if (sendBtn) {
+    sendBtn.classList.toggle("busy", value);
+    sendBtn.classList.toggle("steer-mode", value);
+    const sendIcon = sendBtn.querySelector(".send-icon");
+    const steerIcon = sendBtn.querySelector(".steer-icon");
+    if (sendIcon) sendIcon.style.display = value ? "none" : "";
+    if (steerIcon) steerIcon.style.display = value ? "" : "none";
+    setButtonLabel(sendBtn, value ? t("Steer") : t("Send"));
+    sendBtn.title = value ? t("Send to the running task (Enter)") : t("Send task (Enter)");
+  }
+  if (maybe("stopButton")) $("stopButton").hidden = !value;
   // Left enabled while busy on purpose: a disabled button swallows the click
   // and the "abort the running task first" guard never gets to explain
   // itself, which reads as the control being broken.
@@ -4186,6 +4248,12 @@ function perceptionArm(delay) {
   perception.timers.add(timer);
 }
 
+const PERCEPTION_LABELS = {
+  camera: () => t("Camera"),
+  depth: () => t("Depth Camera"),
+  scene: () => t("Scene Map"),
+};
+
 function renderPerceptionStrip(tiles) {
   const strip = document.getElementById("perceptionSourceStrip");
   if (!strip) return;
@@ -4193,7 +4261,7 @@ function renderPerceptionStrip(tiles) {
   for (const id of PERCEPTION_TILE_IDS) {
     const chip = document.createElement("span");
     chip.className = `perception-source-chip ${tiles[id] ? "online" : "offline"}`;
-    chip.textContent = id;
+    chip.textContent = PERCEPTION_LABELS[id] ? PERCEPTION_LABELS[id]() : id;
     strip.appendChild(chip);
   }
 }
@@ -4270,7 +4338,13 @@ async function perceptionRefresh() {
       healthBadge.classList.toggle("offline", activeCount === 0);
     }
     if (healthText) {
-      healthText.textContent = activeCount === totalCount ? t("All Streams Active") : `${activeCount}/${totalCount} ${t("Telemetry Active")}`;
+      if (activeCount === totalCount && totalCount > 0) {
+        healthText.textContent = t("All Streams Active");
+      } else if (activeCount > 0) {
+        healthText.textContent = `${activeCount}/${totalCount} ${t("Telemetry Active")}`;
+      } else {
+        healthText.textContent = t("Sensor Array Standby");
+      }
     }
 
     const grid = document.getElementById("perceptionGrid");

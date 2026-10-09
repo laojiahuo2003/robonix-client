@@ -987,6 +987,7 @@ class VitalsDashboard {
     byId("vitalsAlertHistoryTab")?.addEventListener("click", () => this.setAlertMode("history"));
     byId("vitalsClearAlertHistory")?.addEventListener("click", () => this.clearAlertHistory());
     byId("vitalsWarningDismiss")?.addEventListener("click", () => this.closeWarning());
+    byId("vitalsWarningDismissAll")?.addEventListener("click", () => this.closeWarning(true));
     byId("vitalsWarningInspect")?.addEventListener("click", () => this.inspectCurrentAlert());
     byId("vitalsModulesTab")?.addEventListener("click", () => this.setSoftwareMode("modules"));
     byId("vitalsProvidersTab")?.addEventListener("click", () => this.setSoftwareMode("providers"));
@@ -1171,7 +1172,12 @@ class VitalsDashboard {
     const notifyIds = Array.isArray(data.notifyAlertIds) ? data.notifyAlertIds : [];
     const candidates = this.alertsInitialized
       ? notifyIds
-      : this.alerts.filter((alert) => alert.conditionActive).map((alert) => alert.id);
+      : [];
+    if (!this.alertsInitialized) {
+      this.alerts.forEach((alert) => {
+        if (alert?.id) this.notifiedAlertIds.add(Number(alert.id));
+      });
+    }
     this.alertsInitialized = true;
     candidates.forEach((alertId) => {
       const id = Number(alertId);
@@ -1180,7 +1186,9 @@ class VitalsDashboard {
       this.alertQueue.push(id);
     });
     this.renderAlerts();
-    this.showNextWarning();
+    if (this.alertQueue.length) {
+      this.showNextWarning();
+    }
   }
 
   openAlertPanel() {
@@ -1261,7 +1269,9 @@ class VitalsDashboard {
     source.textContent = `${alert.sourceType || "source"} · ${alert.status || "active"}`;
     heading.append(title, source);
     const detail = document.createElement("p");
-    detail.textContent = alert.detail || t("Health anomaly reported");
+    // Details are backend-provided English sentences: run them through t() so
+    // the keys the zh-CN table carries (e.g. "Hardware health anomaly") apply.
+    detail.textContent = t(alert.detail || "Health anomaly reported");
     const meta = document.createElement("div");
     meta.className = "vitals-alert-meta";
     const firstSeen = document.createElement("span");
@@ -1363,7 +1373,7 @@ class VitalsDashboard {
       dialog?.setAttribute("data-severity", safeHealth(alert.severity));
       if (byId("vitalsWarningSeverity")) byId("vitalsWarningSeverity").textContent = t(safeHealth(alert.severity).toUpperCase());
       if (byId("vitalsWarningTitle")) byId("vitalsWarningTitle").textContent = alert.label || t("Robot alert");
-      if (byId("vitalsWarningDetail")) byId("vitalsWarningDetail").textContent = alert.detail || t("A health anomaly requires attention.");
+      if (byId("vitalsWarningDetail")) byId("vitalsWarningDetail").textContent = t(alert.detail || "A health anomaly requires attention.");
       if (byId("vitalsWarningSource")) byId("vitalsWarningSource").textContent = `${alert.sourceType}: ${alert.sourceId}`;
       if (byId("vitalsWarningTime")) byId("vitalsWarningTime").textContent = formatDateTime(alert.firstSeenAtMs);
       if (byId("vitalsWarningInspect")) {
@@ -1375,11 +1385,17 @@ class VitalsDashboard {
     }
   }
 
-  closeWarning() {
+  closeWarning(dismissAll = false) {
     const layer = byId("vitalsWarningLayer");
     if (layer) layer.hidden = true;
     this.currentAlert = null;
-    window.setTimeout(() => this.showNextWarning(), 120);
+    if (dismissAll) {
+      this.alertQueue = [];
+      return;
+    }
+    if (this.alertQueue.length) {
+      window.setTimeout(() => this.showNextWarning(), 120);
+    }
   }
 
   inspectCurrentAlert() {
