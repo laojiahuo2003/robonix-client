@@ -784,7 +784,7 @@ h2 {
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-columns: 196px minmax(0, 1fr);
+  grid-template-columns: 216px minmax(0, 1fr);
   gap: 8px;
   padding: 10px 10px 0;
   overflow: hidden;
@@ -797,52 +797,83 @@ h2 {
 .conversation-history {
   min-width: 0;
   min-height: 0;
-  min-inline-size: 196px;
-  overflow: auto;
-  display: grid;
-  align-content: start;
+  height: 100%;
+  max-height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
   gap: 6px;
   padding-right: 4px;
   border-right: 1px solid var(--line-soft);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(64, 150, 180, 0.3) transparent;
+}
+
+.conversation-history::-webkit-scrollbar {
+  width: 5px;
+}
+
+.conversation-history::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.conversation-history::-webkit-scrollbar-thumb {
+  background: rgba(64, 150, 180, 0.25);
+  border-radius: 4px;
+}
+
+.conversation-history::-webkit-scrollbar-thumb:hover {
+  background: rgba(64, 150, 180, 0.5);
 }
 
 .history-empty {
-  padding: 9px;
+  padding: 12px 10px;
   border: 1px dashed var(--line);
   border-radius: 7px;
   color: var(--dim);
   font-size: 12px;
+  text-align: center;
 }
 
 .history-item {
+  position: relative;
   min-width: 0;
-  display: block;
-  border: 1px solid transparent;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid rgba(255, 255, 255, 0.05);
   border-radius: 7px;
   background: rgba(11, 20, 25, 0.7);
+  transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
   overflow: hidden;
 }
 
 .history-item.active {
   border-color: #2c6282;
   background: rgba(18, 45, 62, 0.88);
+  box-shadow: 0 0 10px rgba(0, 229, 255, 0.08) inset;
 }
 
-.history-open,
-.history-delete {
+.history-item:hover,
+.history-item:focus-within {
+  border-color: var(--cyan);
+  background: rgba(15, 30, 40, 0.85);
+}
+
+.history-open {
+  flex: 1;
   min-width: 0;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-align: left;
   border: 0;
   background: transparent;
   color: var(--text);
   cursor: pointer;
-}
-
-.history-open {
-  width: 100%;
-  padding: 10px 10px 9px;
-  display: grid;
-  gap: 3px;
-  text-align: left;
 }
 
 .history-open:focus-visible {
@@ -860,7 +891,8 @@ h2 {
 
 .history-open strong {
   font-size: 12px;
-  font-weight: 720;
+  font-weight: 650;
+  line-height: 1.3;
 }
 
 .history-open span {
@@ -868,9 +900,44 @@ h2 {
   font-size: 11px;
 }
 
-.history-item:hover,
-.history-item:focus-within {
-  border-color: var(--cyan);
+.history-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 6px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.history-item:hover .history-actions,
+.history-item:focus-within .history-actions,
+.history-item.active .history-actions {
+  opacity: 1;
+}
+
+.history-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.15s, background-color 0.15s;
+}
+
+.history-action-btn:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.history-action-btn.history-delete:hover {
+  color: #ff5252;
+  background: rgba(255, 82, 82, 0.18);
 }
 
 .message {
@@ -4014,6 +4081,8 @@ select:focus {
 
   .conversation-history {
     min-inline-size: 0;
+    max-height: 160px;
+    flex-shrink: 0;
     border-right: 0;
     border-bottom: 1px solid var(--line-soft);
     padding-right: 0;
@@ -4810,6 +4879,7 @@ select:focus {
   transition: transform 200ms ease;
 }
 
+
 /* ── Cybernetic Standby Hub (Global Empty State) ─────────────────────── */
 
 .perception-empty {
@@ -5335,3 +5405,327 @@ select:focus {
     height: 74px;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Robonix Studio — Integrated Service Cockpit
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.page.studio-page {
+  display: none;
+  height: 100%;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+  background: #0b0e14;
+}
+
+.page.studio-page.active {
+  display: flex;
+}
+
+.studio-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.studio-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 18px;
+  background: rgba(18, 22, 30, 0.95);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(12px);
+  z-index: 10;
+}
+
+.studio-title-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.studio-title-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.studio-title-line h2 {
+  font-size: 15px;
+  font-weight: 700;
+  color: #f0f4f8;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+.studio-tag {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(122, 167, 255, 0.12);
+  color: #7aa7ff;
+  border: 1px solid rgba(122, 167, 255, 0.25);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+.studio-service-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(90, 209, 230, 0.3);
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: #5ad1e6;
+}
+
+.studio-service-badge .pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #5ad1e6;
+  box-shadow: 0 0 6px #5ad1e6;
+  animation: studioPulse 1.8s infinite ease-in-out;
+}
+
+@keyframes studioPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.85); }
+}
+
+.studio-services-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 3px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.studio-services-nav::-webkit-scrollbar {
+  display: none;
+}
+
+.studio-service-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: rgba(220, 230, 242, 0.75);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 130ms ease;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.studio-service-tab:hover {
+  color: #f0f4f8;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.studio-service-tab.active {
+  color: #ffffff;
+  background: linear-gradient(135deg, rgba(35, 75, 120, 0.7) 0%, rgba(20, 50, 85, 0.7) 100%);
+  border-color: rgba(122, 167, 255, 0.45);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35), 0 0 8px rgba(122, 167, 255, 0.2);
+}
+
+.studio-service-tab .tab-icon {
+  font-size: 12px;
+}
+
+.studio-service-tab .tab-port {
+  font-size: 9.5px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  opacity: 0.6;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.studio-service-tab.active .tab-port {
+  opacity: 0.9;
+  background: rgba(122, 167, 255, 0.25);
+  color: #dce7ff;
+}
+
+.studio-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.studio-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(220, 230, 242, 0.8);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: all 120ms ease;
+  user-select: none;
+}
+
+.studio-action-btn:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.studio-viewport {
+  flex: 1;
+  position: relative;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  background: #0e1117;
+  overflow: hidden;
+}
+
+.studio-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: transparent;
+}
+
+.studio-loading-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: rgba(11, 14, 20, 0.88);
+  backdrop-filter: blur(8px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  pointer-events: none;
+  transition: opacity 180ms ease;
+}
+
+.studio-loading-scrim[hidden] {
+  display: none !important;
+}
+
+.studio-spinner {
+  width: 28px;
+  height: 28px;
+  border: 2.5px solid rgba(122, 167, 255, 0.2);
+  border-top-color: #7aa7ff;
+  border-right-color: #5ad1e6;
+  border-radius: 50%;
+  animation: studioSpin 0.75s linear infinite;
+}
+
+@keyframes studioSpin {
+  to { transform: rotate(360deg); }
+}
+
+.studio-loading-text {
+  font-size: 11.5px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  color: rgba(220, 230, 242, 0.7);
+}
+
+.studio-viewport:fullscreen {
+  background: #0b0e14;
+}
+
+.studio-viewport:fullscreen .studio-frame {
+  width: 100vw;
+  height: 100vh;
+}
+
+.studio-action-btn.scanning svg {
+  animation: studioSpin 0.8s linear infinite;
+}
+
+.studio-service-badge.scanning .pulse-dot {
+  background: #5ad1e6;
+  box-shadow: 0 0 8px rgba(90, 209, 230, 0.8);
+}
+
+.studio-empty-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 24px;
+  background: radial-gradient(circle at center, rgba(17, 24, 39, 0.92) 0%, rgba(11, 14, 20, 0.98) 100%);
+  z-index: 10;
+  gap: 12px;
+}
+
+.studio-empty-icon {
+  font-size: 38px;
+  filter: drop-shadow(0 0 16px rgba(90, 209, 230, 0.3));
+  margin-bottom: 4px;
+}
+
+.studio-empty-state h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #f1f5f9;
+  letter-spacing: -0.01em;
+}
+
+.studio-empty-desc {
+  margin: 0;
+  font-size: 12.5px;
+  color: #94a3b8;
+  max-width: 440px;
+  line-height: 1.5;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+.studio-empty-scan-btn {
+  margin-top: 8px;
+  padding: 7px 18px;
+  background: rgba(90, 209, 230, 0.12);
+  border-color: rgba(90, 209, 230, 0.35);
+  color: #5ad1e6;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.studio-empty-scan-btn:hover {
+  background: rgba(90, 209, 230, 0.22);
+  border-color: rgba(90, 209, 230, 0.6);
+  color: #fff;
+}
+

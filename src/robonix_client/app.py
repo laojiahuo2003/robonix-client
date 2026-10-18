@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 import grpc
 import yaml
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -45,6 +46,7 @@ from .transport import (
 STATIC_DIR = Path(__file__).with_name("static")
 
 app = FastAPI(title="Robonix Client", version="0.1.0")
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
 class _RevalidatingStaticFiles(StaticFiles):
@@ -326,6 +328,111 @@ async def perception_map(atlas: str = Query(DEFAULT_ATLAS)) -> dict[str, Any]:
         return {"ok": True, "occupancy": await perception.map_occupancy(atlas)}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Dynamic Robot Ontology Studio Discovery
+# ═══════════════════════════════════════════════════════════════════════════
+
+CANDIDATE_STUDIO_PORTS = [
+    50107,  # Scene Perception Suite
+    8091,   # RTAB-Map SLAM Mapping
+    4880,   # Robonix Hub
+    60001,  # Audio Device Server
+    8080,   # Standard Robotics WebUI
+    8085,   # Arm / Hand / Manipulator Control WebUI
+    8765,   # Foxglove Studio Bridge / Web
+    9090,   # Rosbridge WebSocket / Web Suite
+    5000,   # Alternative Service Flask/FastAPI
+    3000,   # Dashboard / Web App
+]
+
+
+def _probe_http_port_sync(host: str, port: int, timeout: float = 0.35) -> dict[str, Any] | None:
+    import urllib.request
+    import urllib.error
+    import re
+    url = f"http://{host}:{port}/"
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "RobonixStudio/1.0"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            content = resp.read(4096).decode("utf-8", errors="ignore")
+            title_m = re.search(r"<title>(.*?)</title>", content, re.IGNORECASE | re.DOTALL)
+            title = title_m.group(1).strip() if title_m else ""
+            return {"port": port, "title": title, "status": resp.status, "online": True}
+    except urllib.error.HTTPError as e:
+        return {"port": port, "title": f"HTTP {e.code}", "status": e.code, "online": True}
+    except Exception:
+        return None
+
+
+def _infer_service_metadata(port: int, raw_title: str) -> dict[str, str]:
+    tl = raw_title.lower()
+    if port == 50107 or "scene" in tl:
+        return {"name": "Scene Service", "icon": "👁️", "desc": "Scene Perception Suite"}
+    if port == 8091 or "mapping" in tl or "slam" in tl:
+        return {"name": "SLAM Mapping", "icon": "🗺️", "desc": "RTAB-Map SLAM Console"}
+    if port == 4880 or "hub" in tl:
+        return {"name": "Robonix Hub", "icon": "🌐", "desc": "Fleet Portal Dashboard"}
+    if port == 60001 or "audio" in tl:
+        return {"name": "Audio Server", "icon": "🔊", "desc": "Audio Device Server"}
+    if port == 8085 or "arm" in tl or "hand" in tl:
+        return {"name": "Manipulator Control", "icon": "🦾", "desc": "Arm & Hand WebUI"}
+    if port == 8765 or "foxglove" in tl:
+        return {"name": "Foxglove Bridge", "icon": "🦊", "desc": "Foxglove Studio Bridge"}
+    clean_title = raw_title.replace("Robonix · ", "").replace("robonix ", "").strip()
+    return {
+        "name": clean_title or f"Service {port}",
+        "icon": "⚙️",
+        "desc": f"Web Service on port {port}",
+    }
+
+
+@app.get("/api/studio/services")
+async def discover_studio_services(
+    robot_host: str = "127.0.0.1",
+    extra_ports: str = "",
+) -> dict[str, Any]:
+    if not isinstance(robot_host, str):
+        robot_host = "127.0.0.1"
+    if not isinstance(extra_ports, str):
+        extra_ports = ""
+    host = robot_host.strip() or "127.0.0.1"
+    ports_set = list(CANDIDATE_STUDIO_PORTS)
+    if extra_ports:
+        for ep in extra_ports.split(","):
+            with suppress(ValueError):
+                p = int(ep.strip())
+                if p not in ports_set:
+                    ports_set.append(p)
+
+    tasks = [asyncio.to_thread(_probe_http_port_sync, host, port) for port in ports_set]
+    results = await asyncio.gather(*tasks)
+
+    discovered = []
+    for r in results:
+        if not r:
+            continue
+        meta = _infer_service_metadata(r["port"], r["title"])
+        discovered.append({
+            "id": f"service_{r['port']}",
+            "port": r["port"],
+            "name": meta["name"],
+            "icon": meta["icon"],
+            "desc": meta["desc"],
+            "title": r["title"],
+            "url": f"http://{host}:{r['port']}/",
+            "online": True,
+        })
+
+    def _sort_key(s: dict[str, Any]) -> int:
+        order = {50107: 1, 8091: 2, 4880: 3, 60001: 4}
+        return order.get(s["port"], 100 + s["port"])
+
+    discovered.sort(key=_sort_key)
+    return {"ok": True, "host": host, "services": discovered}
+
 
 
 @app.post("/api/voice/finish-supported")

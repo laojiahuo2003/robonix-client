@@ -14,6 +14,7 @@ const state = {
   settings: {},
   sessionId: getSessionId(),
   sessionTitle: "",
+  customTitle: false,
   attachments: [],
   messages: [],
   timeline: [],
@@ -149,26 +150,57 @@ function loadStoredSettings() {
   }
 }
 
+function truncateTitle(text, maxChars = 24) {
+  if (!text) return "";
+  const clean = String(text)
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  if (!clean) return "";
+  const chars = Array.from(clean);
+  if (chars.length > maxChars) {
+    return chars.slice(0, maxChars).join("") + "…";
+  }
+  return clean;
+}
+
+function hasConversationContent(conversation = null) {
+  const target = conversation || state;
+  if (!target) return false;
+  if (target.customTitle && target.title) return true;
+  const msgs = target.messages || [];
+  const hasUserMsg = msgs.some((m) => m.role === "user" && String(m.text || "").trim());
+  if (hasUserMsg) return true;
+  if (target.plan || (target.planRecords && target.planRecords.length > 0)) return true;
+  return false;
+}
+
 function loadConversations() {
   try {
-    const conversations = JSON.parse(localStorage.getItem("robonix.conversations") || "[]");
-    if (Array.isArray(conversations)) return conversations;
+    const raw = JSON.parse(localStorage.getItem("robonix.conversations") || "[]");
+    if (Array.isArray(raw)) {
+      return raw.filter((c) => hasConversationContent(c));
+    }
   } catch (_) {
     // Fall through to one-time migration from the old prompt-only history.
   }
   try {
     const oldHistory = JSON.parse(localStorage.getItem("robonix.history") || "[]");
     if (!Array.isArray(oldHistory)) return [];
-    return oldHistory.slice(0, 18).map((item) => ({
-      id: getSessionId(),
-      title: item.text || t("Untitled chat"),
-      updatedAt: item.at || Date.now(),
-      messages: item.text ? [{ id: getSessionId(), role: "user", text: item.text, meta: "" }] : [],
-      timeline: [],
-      plan: null,
-      batches: [],
-      nodeStates: {},
-    }));
+    return oldHistory
+      .slice(0, 18)
+      .filter((item) => item.text && item.text.trim())
+      .map((item) => ({
+        id: getSessionId(),
+        title: truncateTitle(item.text, 24) || t("Untitled chat"),
+        customTitle: false,
+        updatedAt: item.at || Date.now(),
+        messages: [{ id: getSessionId(), role: "user", text: item.text, meta: "" }],
+        timeline: [],
+        plan: null,
+        batches: [],
+        nodeStates: {},
+      }));
   } catch (_) {
     return [];
   }
@@ -237,6 +269,7 @@ function restoreLastSession() {
   if (!conversation) return false;
   state.sessionId = conversation.id;
   state.sessionTitle = conversation.title || "";
+  state.customTitle = Boolean(conversation.customTitle);
   state.messages = (conversation.messages || []).map((item) => ({ ...item }));
   state.timeline = (conversation.timeline || []).map((item) => ({ ...item }));
   state.plan = conversation.plan || null;
@@ -287,6 +320,7 @@ async function init() {
   bindSceneLayers();
   bindSceneView();
   bindPerceptionControls();
+  bindStudioControls();
   bindCameraSnapshot();
   bindDepthColormap();
   bindDepthHover();
@@ -301,12 +335,43 @@ async function init() {
   refreshAudioRoute();
   refreshVoiceFinishSupport();
   // The speaking aura is visible on every page, so its physical output-level
-  // stream must be connected at startup rather than only after opening Audio.
   checkAudioServer();
-  setInterval(refreshSystem, 7000);
-  setInterval(refreshActivePlans, 2000);
-  setInterval(refreshHandsfree, 2500);
-  setInterval(refreshVoiceFinishSupport, 7000);
+
+  const targetPage = (window.location.hash.slice(1) || localStorage.getItem("robonix.active_page") || "dashboard").toLowerCase();
+  const validButton = document.querySelector(`[data-page="${targetPage}"]`);
+  activatePage(validButton ? targetPage : "dashboard");
+
+  window.addEventListener("hashchange", () => {
+    const pageFromHash = window.location.hash.slice(1).toLowerCase();
+    if (pageFromHash && document.querySelector(`[data-page="${pageFromHash}"]`)) {
+      if (state.activePage !== pageFromHash) {
+        activatePage(pageFromHash);
+      }
+    }
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      if (perception.polling) {
+        stopPerception();
+        perception.pausedByVisibility = true;
+      }
+    } else {
+      if (state.activePage === "perception" && perception.pausedByVisibility) {
+        perception.pausedByVisibility = false;
+        startPerception();
+      }
+      refreshSystem();
+      if (state.activePage === "dashboard") {
+        refreshActivePlans();
+      }
+    }
+  });
+
+  setInterval(() => { if (!document.hidden) refreshSystem(); }, 7000);
+  setInterval(() => { if (!document.hidden && state.activePage === "dashboard") refreshActivePlans(); }, 2000);
+  setInterval(() => { if (!document.hidden) refreshHandsfree(); }, 2500);
+  setInterval(() => { if (!document.hidden) refreshVoiceFinishSupport(); }, 7000);
 }
 
 function bindSettings() {
@@ -773,11 +838,24 @@ function renderAttachments() {
 }
 
 function activatePage(name) {
+  if (!name) return;
+  state.activePage = name;
+  try {
+    localStorage.setItem("robonix.active_page", name);
+    if (window.location.hash.slice(1) !== name) {
+      history.replaceState(null, "", `#${name}`);
+    }
+  } catch (_) {}
   document.querySelectorAll("[data-page]").forEach((button) => button.classList.toggle("active", button.dataset.page === name));
   document.querySelectorAll("[data-page-panel]").forEach((panel) => panel.classList.toggle("active", panel.dataset.pagePanel === name));
   window.dispatchEvent(new CustomEvent("robonix:page", { detail: { name } }));
   if (name === "audio") {
     checkAudioServer();
+    renderAudioBars();
+    renderAudioLog();
+  }
+  if (name === "dashboard") {
+    refreshActivePlans();
   }
 }
 
@@ -812,7 +890,8 @@ function newSession() {
   state.sessionId = getSessionId();
   rememberLastSession(state.sessionId);
   forgetActiveTurn();
-  state.sessionTitle = "";
+  state.sessionTitle = requestedTitle ? uniqueConversationTitle(requestedTitle, state.sessionId) : "";
+  state.customTitle = Boolean(requestedTitle);
   state.messages = [];
   state.timeline = [];
   state.plan = null;
@@ -820,15 +899,10 @@ function newSession() {
   state.batches = [];
   state.nodeStates = {};
   state.activeAgentId = null;
-  state.sessionTitle = uniqueConversationTitle(requestedTitle || t("Untitled chat"), state.sessionId);
-  $("promptTitle").textContent = state.sessionTitle;
+  if (maybe("promptTitle")) $("promptTitle").textContent = state.sessionTitle || t("What should Robonix do?");
   renderSessionChip();
-  // force: an empty transcript would otherwise fail the has-content check and
-  // the new session would not appear in the sidebar until its first message.
-  persistCurrentConversation("", true);
   // Pilot keys conversation history by session id, so a fresh id is what
-  // actually drops the old turns from the next prompt. Say so -- against an
-  // already-empty transcript the reset is otherwise invisible.
+  // actually drops the old turns from the next prompt.
   addStatusLine(t("New session started; the planner's history for this conversation is cleared."));
   addTimeline("status", t("new session {id}", { id: state.sessionId.slice(0, 8) }));
   renderMessages();
@@ -861,14 +935,24 @@ function commitSessionTitle() {
     return;
   }
   const typed = field.value.trim();
-  if (!typed || typed === state.sessionTitle) {
+  if (!typed) {
+    state.customTitle = false;
+    const userPrompt = firstUserMessage();
+    state.sessionTitle = userPrompt ? truncateTitle(userPrompt, 24) : "";
+    if (maybe("promptTitle")) $("promptTitle").textContent = state.sessionTitle || t("What should Robonix do?");
+    renderSessionChip();
+    persistCurrentConversation();
+    return;
+  }
+  if (typed === state.sessionTitle) {
     renderSessionChip();
     return;
   }
   const title = uniqueConversationTitle(typed, state.sessionId);
   state.sessionTitle = title;
+  state.customTitle = true;
   if (maybe("promptTitle")) $("promptTitle").textContent = title;
-  persistCurrentConversation("", true);
+  persistCurrentConversation(title, true);
   renderSessionChip();
 }
 
@@ -2029,12 +2113,15 @@ async function refreshActivePlans() {
     }
     state.executorMissingPolls.set(planId, Number(state.executorMissingPolls.get(planId) || 0) + 1);
   });
-  renderActivePlans();
-  renderPlan();
+  if (state.activePage === "dashboard") {
+    renderActivePlans();
+    renderPlan();
+  }
 }
 
 function renderActivePlans(error = "") {
   state.activePlansError = error;
+  if (state.activePage !== "dashboard") return;
   const root = maybe("activeRtdlList");
   const count = maybe("activeRtdlCount");
   const summary = maybe("activeRtdlSummary");
@@ -2565,16 +2652,38 @@ function uniqueConversationTitle(base, selfId) {
 }
 
 function persistCurrentConversation(titleHint = "", force = false) {
-  const hasContent = state.sessionTitle || state.messages.length || state.timeline.length || state.plan || state.planRecords.length || state.batches.length || Object.keys(state.nodeStates || {}).length;
+  const hasContent = hasConversationContent(state);
   if (!hasContent && !force) return;
   const existingIndex = state.history.findIndex((item) => item.id === state.sessionId);
   const existing = existingIndex >= 0 ? state.history[existingIndex] : null;
-  const baseTitle = state.sessionTitle || existing?.title || titleHint || firstUserMessage() || t("Untitled chat");
+
+  let baseTitle = "";
+  if (state.customTitle && state.sessionTitle) {
+    baseTitle = state.sessionTitle;
+  } else {
+    const firstPrompt = firstUserMessage();
+    if (firstPrompt) {
+      baseTitle = truncateTitle(firstPrompt, 24);
+    } else if (titleHint) {
+      baseTitle = truncateTitle(titleHint, 24);
+    } else if (existing?.title) {
+      baseTitle = existing.title;
+    } else if (state.sessionTitle) {
+      baseTitle = state.sessionTitle;
+    } else {
+      baseTitle = t("Untitled chat");
+    }
+  }
+
   const title = uniqueConversationTitle(baseTitle, state.sessionId);
   state.sessionTitle = title;
+  if (maybe("promptTitle")) $("promptTitle").textContent = title;
+  renderSessionChip();
+
   const conversation = {
     id: state.sessionId,
     title,
+    customTitle: Boolean(state.customTitle),
     updatedAt: Date.now(),
     messages: state.messages.map((item) => ({ ...item })),
     timeline: state.timeline.map((item) => ({ ...item })),
@@ -2583,6 +2692,7 @@ function persistCurrentConversation(titleHint = "", force = false) {
     batches: state.batches,
     nodeStates: state.nodeStates,
   };
+
   // Update in place. Hoisting the current conversation to the front on every
   // save re-sorted the sidebar just from visiting a chat, so rows moved out
   // from under the pointer mid-click. New conversations still go on top.
@@ -2606,37 +2716,48 @@ function renderHistory() {
   state.history.forEach((item) => {
     const row = document.createElement("div");
     row.className = `history-item${item.id === state.sessionId ? " active" : ""}`;
+
     const open = document.createElement("button");
     open.type = "button";
     open.className = "history-open";
     open.title = item.title;
+
     const title = document.createElement("strong");
     title.textContent = item.title || t("Untitled chat");
+
     const meta = document.createElement("span");
     meta.textContent = formatConversationTime(item.updatedAt);
+
     open.append(title, meta);
     open.addEventListener("click", () => openConversation(item.id));
+
+    const actions = document.createElement("div");
+    actions.className = "history-actions";
+
     const rename = document.createElement("button");
     rename.type = "button";
-    rename.className = "history-rename";
+    rename.className = "history-action-btn history-rename";
     rename.title = t("Rename conversation");
     rename.setAttribute("aria-label", t("Rename {name}", { name: item.title || t("conversation") }));
-    rename.textContent = t("Rename");
+    rename.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`;
     rename.addEventListener("click", (event) => {
       event.stopPropagation();
       renameConversation(item.id);
     });
+
     const remove = document.createElement("button");
     remove.type = "button";
-    remove.className = "history-delete";
+    remove.className = "history-action-btn history-delete";
     remove.title = t("Delete conversation");
     remove.setAttribute("aria-label", t("Delete {name}", { name: item.title || t("conversation") }));
-    remove.textContent = t("Delete");
+    remove.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>`;
     remove.addEventListener("click", (event) => {
       event.stopPropagation();
       deleteConversation(item.id);
     });
-    row.append(open, rename, remove);
+
+    actions.append(rename, remove);
+    row.append(open, actions);
     root.appendChild(row);
   });
 }
@@ -2650,7 +2771,7 @@ function renameConversation(sessionId) {
   }
   if (sessionId === state.sessionId) persistCurrentConversation("", true);
   const conversation = state.history.find((item) => item.id === sessionId);
-  const currentTitle = conversation?.title || state.sessionTitle || firstUserMessage() || t("Untitled chat");
+  const currentTitle = conversation?.title || state.sessionTitle || truncateTitle(firstUserMessage(), 24) || t("Untitled chat");
   const nextTitle = window.prompt(t("Rename session"), currentTitle);
   if (nextTitle === null) return;
   const trimmed = nextTitle.trim();
@@ -2658,12 +2779,14 @@ function renameConversation(sessionId) {
   const title = uniqueConversationTitle(trimmed, sessionId);
   if (sessionId === state.sessionId) {
     state.sessionTitle = title;
-    $("promptTitle").textContent = title;
+    state.customTitle = true;
+    if (maybe("promptTitle")) $("promptTitle").textContent = title;
     renderSessionChip();
   }
   if (conversation) {
     // Renaming must not reorder the list either -- see persistCurrentConversation.
     conversation.title = title;
+    conversation.customTitle = true;
     conversation.updatedAt = Date.now();
   } else if (sessionId === state.sessionId) {
     persistCurrentConversation(title, true);
@@ -2680,6 +2803,7 @@ function deleteConversation(sessionId) {
     rememberLastSession(state.sessionId);
     forgetActiveTurn();
     state.sessionTitle = "";
+    state.customTitle = false;
     state.messages = [];
     state.timeline = [];
     state.plan = null;
@@ -2687,7 +2811,7 @@ function deleteConversation(sessionId) {
     state.batches = [];
     state.nodeStates = {};
     state.activeAgentId = null;
-    $("promptTitle").textContent = t("What should Robonix do?");
+    if (maybe("promptTitle")) $("promptTitle").textContent = t("What should Robonix do?");
     renderSessionChip();
     renderMessages();
     renderTimeline();
@@ -2704,6 +2828,7 @@ function clearHistory() {
   rememberLastSession(state.sessionId);
   forgetActiveTurn();
   state.sessionTitle = "";
+  state.customTitle = false;
   state.messages = [];
   state.timeline = [];
   state.plan = null;
@@ -2711,7 +2836,8 @@ function clearHistory() {
   state.batches = [];
   state.nodeStates = {};
   state.activeAgentId = null;
-  $("promptTitle").textContent = t("What should Robonix do?");
+  if (maybe("promptTitle")) $("promptTitle").textContent = t("What should Robonix do?");
+  renderSessionChip();
   renderMessages();
   renderTimeline();
   renderPlan();
@@ -2734,6 +2860,7 @@ function openConversation(sessionId) {
   state.sessionId = conversation.id;
   rememberLastSession(conversation.id);
   state.sessionTitle = conversation.title || "";
+  state.customTitle = Boolean(conversation.customTitle);
   forgetActiveTurn();
   state.messages = (conversation.messages || []).map((item) => ({ ...item }));
   state.timeline = (conversation.timeline || []).map((item) => ({ ...item }));
@@ -2742,7 +2869,7 @@ function openConversation(sessionId) {
   state.batches = conversation.batches || [];
   state.nodeStates = conversation.nodeStates || {};
   state.activeAgentId = null;
-  $("promptTitle").textContent = conversation.title || t("What should Robonix do?");
+  if (maybe("promptTitle")) $("promptTitle").textContent = conversation.title || t("What should Robonix do?");
   renderSessionChip();
   $("taskInput").value = "";
   autoGrowInput();
@@ -3133,6 +3260,7 @@ function setTtsAura(active) {
 }
 
 function renderAudioBars() {
+  if (state.activePage !== "audio") return;
   const root = maybe("audioBars");
   if (!root) return;
   clear(root);
@@ -3158,7 +3286,15 @@ function appendAudioLog(line) {
     lines.push({ stamp, text, count: 1 });
   }
   state.audio.logLines = lines.slice(-AUDIO_LOG_MAX_LINES);
-  root.textContent = `${state.audio.logLines.map((item) => {
+  if (state.activePage === "audio") {
+    renderAudioLog();
+  }
+}
+
+function renderAudioLog() {
+  const root = maybe("audioLog");
+  if (!root) return;
+  root.textContent = `${(state.audio.logLines || []).map((item) => {
     const suffix = item.count > 1 ? ` x${item.count}` : "";
     return `[${item.stamp}] ${item.text}${suffix}`;
   }).join("\n")}\n`;
@@ -4674,12 +4810,316 @@ function redrawPerceptionCanvases() {
   }
 }
 
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
+// Robonix Studio — Micro-Frontend Service Integrator (Dynamic Ontology Discovery)
+// ═══════════════════════════════════════════════════════════════════════════
+
+let studioDiscoveredServices = [
+  { port: 50107, name: "Scene Service", icon: "👁️", path: "/", title: "Scene Service" },
+  { port: 8091, name: "SLAM Mapping", icon: "🗺️", path: "/", title: "Mapping Service" },
+  { port: 4880, name: "Robonix Hub", icon: "🌐", path: "/", title: "Fleet Hub" },
+  { port: 60001, name: "Audio Server", icon: "🔊", path: "/", title: "Audio Reverse Bridge" },
+];
+let activeStudioPort = 50107;
+let studioScanning = false;
+let studioHasScanned = false;
+let studioLastScanTs = 0;
+
+function getStudioHost() {
+  return (state && state.settings && state.settings.robotHost) || window.location.hostname || "127.0.0.1";
+}
+
+function getStudioServiceUrl(port, isExternal = false) {
+  const s = studioDiscoveredServices.find((item) => item.port === Number(port));
+  const host = getStudioHost();
+  if (s) {
+    const path = isExternal ? (s.external_path || s.path || "/") : (s.path || "/");
+    return `http://${host}:${s.port}${path}`;
+  }
+  return `http://${host}:${port}/`;
+}
+
+function renderStudioTabs() {
+  const nav = document.getElementById("studioServicesNav");
+  if (!nav) return;
+  nav.innerHTML = "";
+
+  if (!studioDiscoveredServices.length) return;
+
+  studioDiscoveredServices.forEach((s) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `studio-service-tab${s.port === activeStudioPort ? " active" : ""}`;
+    btn.dataset.studioPort = String(s.port);
+    const titleText = `${s.name || s.title} (Port ${s.port})`;
+    btn.title = titleText;
+    btn.setAttribute("data-i18n-title", titleText);
+
+    const iconSpan = document.createElement("span");
+    iconSpan.className = "tab-icon";
+    iconSpan.textContent = s.icon || "🌐";
+
+    const titleSpan = document.createElement("span");
+    titleSpan.className = "tab-title";
+    titleSpan.setAttribute("data-i18n", s.name);
+    titleSpan.textContent = t(s.name);
+
+    const portSpan = document.createElement("span");
+    portSpan.className = "tab-port";
+    portSpan.textContent = String(s.port);
+
+    btn.append(iconSpan, titleSpan, portSpan);
+    nav.appendChild(btn);
+  });
+}
+
+function renderStudioEmptyState(show) {
+  const vp = document.getElementById("studioViewport");
+  const frame = document.getElementById("studioFrame");
+  if (!vp) return;
+
+  let emptyEl = vp.querySelector(".studio-empty-state");
+  if (show) {
+    if (frame) frame.style.display = "none";
+    if (!emptyEl) {
+      emptyEl = document.createElement("div");
+      emptyEl.className = "studio-empty-state";
+      emptyEl.innerHTML = `
+        <div class="studio-empty-icon">📡</div>
+        <h3 data-i18n="No Web services detected on this robot">${t("No Web services detected on this robot")}</h3>
+        <p class="studio-empty-desc">${t("Robot Host")}: ${getStudioHost()}</p>
+        <button type="button" class="studio-empty-scan-btn" id="studioEmptyScanBtn">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/></svg>
+          <span data-i18n="Retry Scan">${t("Retry Scan")}</span>
+        </button>
+      `;
+      vp.appendChild(emptyEl);
+      const retryBtn = emptyEl.querySelector("#studioEmptyScanBtn");
+      if (retryBtn) {
+        retryBtn.addEventListener("click", () => scanStudioServices(true));
+      }
+    }
+  } else {
+    if (emptyEl) emptyEl.remove();
+    if (frame) frame.style.display = "";
+  }
+}
+
+async function scanStudioServices(force = false) {
+  if (studioScanning && !force) return;
+  if (!force && studioHasScanned && Date.now() - studioLastScanTs < 12000) {
+    return;
+  }
+  studioScanning = true;
+  studioHasScanned = true;
+  studioLastScanTs = Date.now();
+
+  const rescanBtn = document.getElementById("studioRescanBtn");
+  const badge = document.getElementById("studioServiceBadge");
+  const badgeText = document.getElementById("studioBadgeText");
+
+  if (rescanBtn) rescanBtn.classList.add("scanning");
+  if (badge) badge.classList.add("scanning");
+  if (badgeText) badgeText.textContent = t("Scanning services...");
+
+  try {
+    const host = getStudioHost();
+    const res = await fetch(`/api/studio/services?robot_host=${encodeURIComponent(host)}`);
+    if (res.ok) {
+      const data = await res.json();
+      studioDiscoveredServices = Array.isArray(data.services) ? data.services : [];
+    } else {
+      console.warn("Studio service scan returned status:", res.status);
+    }
+  } catch (err) {
+    console.warn("Studio service scan failed:", err);
+  } finally {
+    studioScanning = false;
+    if (rescanBtn) rescanBtn.classList.remove("scanning");
+    if (badge) badge.classList.remove("scanning");
+  }
+
+  if (!studioDiscoveredServices.length) {
+    renderStudioTabs();
+    renderStudioEmptyState(true);
+    if (badgeText) badgeText.textContent = `0 ${t("Services Online")}`;
+    return;
+  }
+
+  renderStudioEmptyState(false);
+
+  // Maintain active port if still available; otherwise select first discovered
+  const stillHasActive = studioDiscoveredServices.some((s) => s.port === activeStudioPort);
+  if (!stillHasActive || !activeStudioPort) {
+    activeStudioPort = studioDiscoveredServices[0].port;
+  }
+
+  renderStudioTabs();
+  switchStudioServiceByPort(activeStudioPort);
+}
+
+function switchStudioServiceByPort(port) {
+  const numPort = Number(port);
+  const service = studioDiscoveredServices.find((s) => s.port === numPort);
+  activeStudioPort = numPort;
+
+  // Update tabs active state
+  document.querySelectorAll(".studio-service-tab").forEach((tab) => {
+    tab.classList.toggle("active", Number(tab.dataset.studioPort) === numPort);
+  });
+
+  // Update status badge
+  const badgeText = document.getElementById("studioBadgeText");
+  if (badgeText) {
+    const sName = service ? t(service.name) : "Service";
+    badgeText.textContent = `${sName} · Port ${numPort}`;
+  }
+
+  const vp = document.getElementById("studioViewport");
+  const frame = document.getElementById("studioFrame");
+  const scrim = document.getElementById("studioLoadingScrim");
+
+  let hubCard = vp ? vp.querySelector(".studio-hub-launch-card") : null;
+
+  // Port 4880 (Robonix Hub) sets X-Frame-Options: DENY, cannot be embedded inside iframe directly
+  if (numPort === 4880) {
+    if (scrim) scrim.hidden = true;
+    if (frame) frame.style.display = "none";
+    if (!hubCard && vp) {
+      hubCard = document.createElement("div");
+      hubCard.className = "studio-hub-launch-card studio-empty-state";
+      hubCard.innerHTML = `
+        <div class="studio-empty-icon">🌐</div>
+        <h3>Robonix Hub</h3>
+        <p class="studio-empty-desc">${t("Robonix Hub runs with strict origin isolation. Click below to launch in a dedicated tab.")}</p>
+        <button type="button" class="studio-empty-scan-btn" id="studioOpenHubDirect">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          <span>${t("Open in External Tab")}</span>
+        </button>
+      `;
+      vp.appendChild(hubCard);
+      hubCard.querySelector("#studioOpenHubDirect")?.addEventListener("click", () => {
+        window.open(getStudioServiceUrl(4880, true), "_blank");
+      });
+    } else if (hubCard) {
+      hubCard.style.display = "";
+    }
+    return;
+  }
+
+  if (hubCard) hubCard.style.display = "none";
+  if (frame) frame.style.display = "";
+
+  if (frame) {
+    const targetUrl = getStudioServiceUrl(numPort, false);
+    if (frame.src !== targetUrl) {
+      if (scrim) scrim.hidden = false;
+      frame.src = targetUrl;
+    }
+    frame.onload = () => {
+      if (scrim) scrim.hidden = true;
+      syncStudioFrameLang();
+    };
+    frame.onerror = () => {
+      if (scrim) scrim.hidden = true;
+    };
+    setTimeout(() => {
+      if (scrim) scrim.hidden = true;
+    }, 1500);
+  }
+}
+
+function syncStudioFrameLang() {
+  const frame = document.getElementById("studioFrame");
+  if (!frame || !frame.contentWindow) return;
+  try {
+    const curLang = (localStorage.getItem("robonix.lang") || "zh").startsWith("zh") ? "zh" : "en";
+    frame.contentWindow.postMessage({ sceneLang: curLang }, "*");
+  } catch (_) {}
+}
+
+function bindStudioControls() {
+  const nav = document.getElementById("studioServicesNav");
+  if (nav && !nav.dataset.bound) {
+    nav.dataset.bound = "1";
+    nav.addEventListener("click", (e) => {
+      const tab = e.target.closest(".studio-service-tab");
+      if (tab && tab.dataset.studioPort) {
+        switchStudioServiceByPort(Number(tab.dataset.studioPort));
+      }
+    });
+  }
+
+  const rescanBtn = document.getElementById("studioRescanBtn");
+  if (rescanBtn && !rescanBtn.dataset.bound) {
+    rescanBtn.dataset.bound = "1";
+    rescanBtn.addEventListener("click", () => {
+      scanStudioServices(true);
+    });
+  }
+
+  const reloadBtn = document.getElementById("studioReloadBtn");
+  if (reloadBtn && !reloadBtn.dataset.bound) {
+    reloadBtn.dataset.bound = "1";
+    reloadBtn.addEventListener("click", () => {
+      const frame = document.getElementById("studioFrame");
+      const scrim = document.getElementById("studioLoadingScrim");
+      if (frame && activeStudioPort) {
+        if (scrim) scrim.hidden = false;
+        frame.src = getStudioServiceUrl(activeStudioPort, false);
+        setTimeout(() => { if (scrim) scrim.hidden = true; }, 1200);
+      }
+    });
+  }
+
+  const extBtn = document.getElementById("studioExternalBtn");
+  if (extBtn && !extBtn.dataset.bound) {
+    extBtn.dataset.bound = "1";
+    extBtn.addEventListener("click", () => {
+      if (!activeStudioPort) return;
+      const extUrl = getStudioServiceUrl(activeStudioPort, true);
+      if (extUrl) {
+        window.open(extUrl, "_blank");
+      }
+    });
+  }
+
+  const fsBtn = document.getElementById("studioFullscreenBtn");
+  if (fsBtn && !fsBtn.dataset.bound) {
+    fsBtn.dataset.bound = "1";
+    fsBtn.addEventListener("click", () => {
+      const vp = document.getElementById("studioViewport");
+      if (!vp) return;
+      if (!document.fullscreenElement) {
+        vp.requestFullscreen().catch(() => {});
+      } else {
+        document.exitFullscreen().catch(() => {});
+      }
+    });
+    document.addEventListener("fullscreenchange", () => {
+      const isFs = !!document.fullscreenElement;
+      const enterIcon = fsBtn.querySelector(".fs-enter-icon");
+      const exitIcon = fsBtn.querySelector(".fs-exit-icon");
+      if (enterIcon) enterIcon.style.display = isFs ? "none" : "";
+      if (exitIcon) exitIcon.style.display = isFs ? "" : "none";
+    });
+  }
+}
+
 window.addEventListener("robonix:page", (event) => {
   const name = event.detail && event.detail.name;
   if (name === "perception") {
     startPerception();
   } else {
     stopPerception();
+  }
+  if (name === "studio") {
+    if (!studioHasScanned) {
+      scanStudioServices();
+    }
+    syncStudioFrameLang();
   }
 });
 
@@ -4716,6 +5156,14 @@ function handleI18nChange() {
   setBusy(state.busy);
   updatePerceptionEmptyDiagnostics((perception && perception.tiles) || {});
   redrawPerceptionCanvases();
+  renderStudioTabs();
+  const badgeText = document.getElementById("studioBadgeText");
+  if (badgeText && activeStudioPort) {
+    const s = studioDiscoveredServices.find((item) => item.port === activeStudioPort);
+    const sName = s ? t(s.name) : "Service";
+    badgeText.textContent = `${sName} · Port ${activeStudioPort}`;
+  }
+  syncStudioFrameLang();
 }
 
 window.addEventListener("robonix:i18n", handleI18nChange);
