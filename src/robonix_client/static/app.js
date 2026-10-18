@@ -568,6 +568,9 @@ function bindEvents() {
   document.querySelectorAll("[data-page-action='voice-start']").forEach((button) => {
     button.addEventListener("click", startVoice);
   });
+  document.querySelectorAll("[data-cockpit-tab]").forEach((btn) => {
+    btn.addEventListener("click", () => switchCockpitTab(btn.dataset.cockpitTab));
+  });
   maybe("openRtdlHistory")?.addEventListener("click", openRtdlHistory);
   maybe("closeRtdlHistory")?.addEventListener("click", closeRtdlHistory);
   maybe("openActiveRtdl")?.addEventListener("click", openActiveRtdl);
@@ -582,6 +585,17 @@ function bindEvents() {
     if (event.key === "Escape" && !maybe("activeRtdlModal")?.hidden) closeActiveRtdl();
     if (event.key === "Escape" && !maybe("rtdlHistoryModal")?.hidden) closeRtdlHistory();
   });
+}
+
+function switchCockpitTab(tabName) {
+  state.cockpitTab = tabName;
+  document.querySelectorAll("[data-cockpit-tab]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.cockpitTab === tabName);
+  });
+  const paneTree = maybe("paneTree");
+  const paneEvents = maybe("paneEvents");
+  if (paneTree) paneTree.classList.toggle("active", tabName === "tree");
+  if (paneEvents) paneEvents.classList.toggle("active", tabName === "events");
 }
 
 function openActiveRtdl() {
@@ -1683,21 +1697,35 @@ function renderPlan() {
   roots.forEach((root) => clear(root));
   const records = normalizedPlanRecords();
   const activeRecords = records.filter((record) => recordIsActive(record));
-  const latestRecord = activeRecords[0] || null;
-  const historyRecords = records.filter((record) => !activeRecords.includes(record));
-  const latestCalls = planCalls(latestRecord?.plan).length;
-  setTextAll("[data-plan-summary]", latestRecord
-    ? t("{active} active · plan {plan} · round {round} · {calls} call(s)", {
+  const latestActiveRecord = activeRecords[0] || null;
+  // Retain the active plan if running; otherwise retain the most recent completed plan
+  // so the execution tree doesn't flash and disappear in an instant!
+  const displayRecord = latestActiveRecord || records[0] || null;
+  const historyRecords = records.filter((record) => record !== displayRecord);
+  const displayCalls = planCalls(displayRecord?.plan).length;
+
+  if (latestActiveRecord) {
+    setTextAll("[data-plan-summary]", t("{active} active · plan {plan} · round {round} · {calls} call(s)", {
       active: activeRecords.length,
-      plan: latestRecord.plan.planId || "-",
-      round: latestRecord.plan.round,
-      calls: latestCalls,
-    })
-    : t("No RTDL tree is currently executing"));
+      plan: latestActiveRecord.plan.planId || "-",
+      round: latestActiveRecord.plan.round,
+      calls: displayCalls,
+    }));
+  } else if (displayRecord) {
+    setTextAll("[data-plan-summary]", t("Latest plan {plan} (completed) · round {round} · {calls} call(s)", {
+      plan: displayRecord.plan.planId || "-",
+      round: displayRecord.plan.round,
+      calls: displayCalls,
+    }));
+  } else {
+    setTextAll("[data-plan-summary]", t("No RTDL tree in this session yet."));
+  }
+
   if (maybe("rtdlHistoryCount")) $("rtdlHistoryCount").textContent = String(historyRecords.length);
   renderGoalPanel();
   renderSceneAssets();
-  if (!latestRecord) {
+
+  if (!displayRecord) {
     roots.forEach((root) => {
       const empty = document.createElement("div");
       empty.className = "plan-empty";
@@ -1705,10 +1733,11 @@ function renderPlan() {
       root.appendChild(empty);
     });
   } else {
-    roots.forEach((root) => renderPlanRecord(root, latestRecord));
+    roots.forEach((root) => renderPlanRecord(root, displayRecord));
   }
   renderPlanHistory(historyRecords);
-  const newest = latestRecord;
+
+  const newest = displayRecord;
   if (!newest) return renderExecutionDetail(null, "PENDING");
   const maps = buildResultMaps(newest);
   const runningIndex = pickRunningIndex(newest.plan, maps.byIndex);
@@ -2366,9 +2395,26 @@ function renderGoalPanel() {
   const active = context?.node || null;
   const taskText = task.goal || task.task || firstUserMessage() || t("waiting for task");
   const status = task.status || (context ? "executing" : "idle");
-  if (maybe("goalLine")) $("goalLine").textContent = t("{status}: {task}", { status: t(status), task: taskText });
+  const isExecuting = status === "executing" || Boolean(context?.op) || (Boolean(context?.node) && status !== "idle");
+
+  if (maybe("goalLine")) {
+    $("goalLine").textContent = taskText;
+  }
+
+  const badge = maybe("cockpitStatusBadge");
+  if (badge) {
+    badge.className = `cockpit-status-badge ${isExecuting ? "executing" : "idle"}`;
+    const statusTextEl = maybe("cockpitStatusText");
+    if (statusTextEl) statusTextEl.textContent = isExecuting ? t("EXECUTING") : t("IDLE");
+  }
+
   document.querySelectorAll("[data-goal-preview]").forEach((goal) => {
     clear(goal);
+    if (!context) {
+      goal.style.display = "none";
+      return;
+    }
+    goal.style.display = "";
     const card = document.createElement("div");
     card.className = "goal-card";
     const source = document.createElement("span");
@@ -2382,31 +2428,23 @@ function renderGoalPanel() {
       || context?.plan?.description
       || t("No active Executor call");
     card.append(source, title);
-    if (context) {
-      const fields = document.createElement("div");
-      fields.className = "goal-call-grid";
-      const providerId = active?.call?.providerId || context.op?.provider_id || context.op?.providerId || "-";
-      const contractId = active?.call?.contractId || context.op?.contract_id || context.op?.contractId || "-";
-      appendGoalField(fields, t("Provider"), providerId);
-      appendGoalField(fields, t("Contract"), contractId);
-      appendGoalField(
-        fields,
-        t("Operation"),
-        active?.call?.name || (contractId !== "-" ? contractId.split("/").pop() : "") || context.op?.description || nodeLabel(active || {}),
-      );
-      appendGoalField(
-        fields,
-        t("Plan / node"),
-        `${context.plan?.planId || "-"} / ${context.op?.op_id || context.op?.opId || active?.opId || active?.index || "-"}`,
-      );
-      card.appendChild(fields);
-    } else {
-      const empty = document.createElement("span");
-      empty.textContent = state.executorPlansReady
-        ? t("Executor reports no running RTDL plan.")
-        : t("Connect to Executor to read the authoritative running call.");
-      card.appendChild(empty);
-    }
+    const fields = document.createElement("div");
+    fields.className = "goal-call-grid";
+    const providerId = active?.call?.providerId || context.op?.provider_id || context.op?.providerId || "-";
+    const contractId = active?.call?.contractId || context.op?.contract_id || context.op?.contractId || "-";
+    appendGoalField(fields, t("Provider"), providerId);
+    appendGoalField(fields, t("Contract"), contractId);
+    appendGoalField(
+      fields,
+      t("Operation"),
+      active?.call?.name || (contractId !== "-" ? contractId.split("/").pop() : "") || context.op?.description || nodeLabel(active || {}),
+    );
+    appendGoalField(
+      fields,
+      t("Plan / node"),
+      `${context.plan?.planId || "-"} / ${context.op?.op_id || context.op?.opId || active?.opId || active?.index || "-"}`,
+    );
+    card.appendChild(fields);
     const target = goalSummary(active);
     if (target) {
       const detail = document.createElement("pre");
