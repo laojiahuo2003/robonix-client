@@ -10,6 +10,8 @@ const t = (key, params) => (window.RobonixI18N
     params && params[name] !== undefined && params[name] !== null ? String(params[name]) : whole
   )));
 
+const SIDEBAR_VIEWS = ["rtdl", "events"];
+
 const state = {
   settings: {},
   sessionId: getSessionId(),
@@ -21,6 +23,7 @@ const state = {
   plan: null,
   planRecords: [],
   taskState: null,
+  sidebarView: "rtdl",
   batches: [],
   nodeStates: {},
   executorPlans: [],
@@ -31,6 +34,18 @@ const state = {
   history: loadConversations(),
   busy: false,
   taskRunning: false,
+  // Whether the robot has started answering the current turn. Activity groups
+  // stay expanded while we are still waiting, then fold away as soon as the
+  // reply begins so the answer is not interleaved with ambient status lines.
+  turnReplied: false,
+  // Last task_state key (status + goal). Pilot re-sends the same state on many
+  // events; only transitions deserve a line in the transcript.
+  lastTaskStatusKey: "",
+  // Manual open/closed choices for activity groups, keyed by first message id.
+  expandedActivities: new Map(),
+  // The "connected" milestone is worth one line per page session, not one per
+  // task/voice/abort socket.
+  connectionAnnounced: false,
   activeStreams: 0,
   interactionSockets: new Set(),
   activeTurnId: "",
@@ -488,7 +503,28 @@ function interactionSettings(useActiveTurn = false) {
   return settings;
 }
 
+// The right sidebar keeps all three panels in the DOM but shows one at a time;
+// the menu at the top of the column picks which. Panels are never rebuilt, so
+// the goal card, the execution tree, the node detail, and the event log keep
+// rendering into them while they are hidden.
+function setSidebarView(view) {
+  const next = SIDEBAR_VIEWS.includes(view) ? view : "rtdl";
+  state.sidebarView = next;
+  document.querySelectorAll("[data-sidebar-view]").forEach((item) => {
+    const active = item.dataset.sidebarView === next;
+    item.classList.toggle("active", active);
+    item.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+  document.querySelectorAll("[data-sidebar-panel]").forEach((panel) => {
+    panel.hidden = panel.dataset.sidebarPanel !== next;
+  });
+}
+
 function bindEvents() {
+  document.querySelectorAll("[data-sidebar-view]").forEach((item) => {
+    item.addEventListener("click", () => setSidebarView(item.dataset.sidebarView));
+  });
+  setSidebarView(state.sidebarView);
   $("composer").addEventListener("submit", (event) => {
     event.preventDefault();
     sendTask();
@@ -504,7 +540,7 @@ function bindEvents() {
     event.preventDefault();
     if (state.voiceRecording) {
       if (state.voiceFinishSupported) finishVoiceCapture();
-      else addStatusLine(t("This robot cannot stop a recording on request; it ends on silence or at the record-seconds limit."));
+      else addStatusLine(t("This robot cannot stop a recording on request; it ends on silence or at the record-seconds limit."), "activity", "This robot cannot stop a recording on request; it ends on silence or at the record-seconds limit.");
       return;
     }
     if (state.voiceActive) return;
@@ -568,9 +604,6 @@ function bindEvents() {
   document.querySelectorAll("[data-page-action='voice-start']").forEach((button) => {
     button.addEventListener("click", startVoice);
   });
-  document.querySelectorAll("[data-cockpit-tab]").forEach((btn) => {
-    btn.addEventListener("click", () => switchCockpitTab(btn.dataset.cockpitTab));
-  });
   maybe("openRtdlHistory")?.addEventListener("click", openRtdlHistory);
   maybe("closeRtdlHistory")?.addEventListener("click", closeRtdlHistory);
   maybe("openActiveRtdl")?.addEventListener("click", openActiveRtdl);
@@ -581,21 +614,15 @@ function bindEvents() {
   maybe("rtdlHistoryModal")?.addEventListener("click", (event) => {
     if (event.target === event.currentTarget) closeRtdlHistory();
   });
+  maybe("closeNodeDetail")?.addEventListener("click", closeNodeDetail);
+  maybe("nodeDetailModal")?.addEventListener("click", (event) => {
+    if (event.target === event.currentTarget) closeNodeDetail();
+  });
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && !maybe("activeRtdlModal")?.hidden) closeActiveRtdl();
     if (event.key === "Escape" && !maybe("rtdlHistoryModal")?.hidden) closeRtdlHistory();
+    if (event.key === "Escape" && !maybe("nodeDetailModal")?.hidden) closeNodeDetail();
   });
-}
-
-function switchCockpitTab(tabName) {
-  state.cockpitTab = tabName;
-  document.querySelectorAll("[data-cockpit-tab]").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.cockpitTab === tabName);
-  });
-  const paneTree = maybe("paneTree");
-  const paneEvents = maybe("paneEvents");
-  if (paneTree) paneTree.classList.toggle("active", tabName === "tree");
-  if (paneEvents) paneEvents.classList.toggle("active", tabName === "events");
 }
 
 function openActiveRtdl() {
@@ -611,6 +638,20 @@ function closeActiveRtdl() {
   if (!modal || modal.hidden) return;
   modal.hidden = true;
   maybe("openActiveRtdl")?.focus();
+}
+
+function showNodeDetail(node, status, nodeState = null) {
+  renderExecutionDetail(node, status, nodeState);
+  const modal = maybe("nodeDetailModal");
+  if (!modal) return;
+  modal.hidden = false;
+  maybe("closeNodeDetail")?.focus();
+}
+
+function closeNodeDetail() {
+  const modal = maybe("nodeDetailModal");
+  if (!modal || modal.hidden) return;
+  modal.hidden = true;
 }
 
 function openRtdlHistory() {
@@ -654,7 +695,7 @@ async function refreshHandsfree() {
 
 async function toggleHandsfree() {
   if (state.voiceActive) {
-    addStatusLine(t("Stop the active F2 voice session before changing hands-free mode."));
+    addStatusLine(t("Stop the active F2 voice session before changing hands-free mode."), "activity", "Stop the active F2 voice session before changing hands-free mode.");
     return;
   }
   if (state.handsfree.busy) return;
@@ -782,7 +823,7 @@ function syncHandsfreeEventStream() {
   state.handsfreeSocket = socket;
   socket.onopen = () => {
     socket.send(JSON.stringify({ settings: collectSettings() }));
-    addStatusLine(t("Watching robot hands-free interaction."));
+    addStatusLine(t("Watching robot hands-free interaction."), "activity", "Watching robot hands-free interaction.");
   };
   socket.onmessage = (message) => {
     const payload = JSON.parse(message.data);
@@ -885,12 +926,15 @@ function forgetActiveTurn() {
   state.activePilotSessionId = "";
   state.taskState = null;
   state.taskRunning = false;
+  state.turnReplied = false;
+  state.lastTaskStatusKey = "";
+  state.expandedActivities.clear();
 }
 
 function newSession() {
   if (state.busy) {
     pendingNewSessionTitle = null;
-    addStatusLine(t("Abort the running task before starting a new session."));
+    addStatusLine(t("Abort the running task before starting a new session."), "milestone", "Abort the running task before starting a new session.");
     return;
   }
   // Captured at mousedown, before the field blurred. An untouched field still
@@ -917,7 +961,7 @@ function newSession() {
   renderSessionChip();
   // Pilot keys conversation history by session id, so a fresh id is what
   // actually drops the old turns from the next prompt.
-  addStatusLine(t("New session started; the planner's history for this conversation is cleared."));
+  addStatusLine(t("New session started; the planner's history for this conversation is cleared."), "milestone", "New session started; the planner's history for this conversation is cleared.");
   addTimeline("status", t("new session {id}", { id: state.sessionId.slice(0, 8) }));
   renderMessages();
   renderTimeline();
@@ -979,9 +1023,17 @@ async function sendTask() {
   // mark input as steer while Pilot has task state that can actually accept it.
   const wasBusy = hasActiveTurn();
   state.activeVoiceMode = "voice";
+  // A fresh instruction opens a new turn: activity starts unfolded again even
+  // when this message steers a task that is already running.
+  state.turnReplied = false;
+  state.lastTaskStatusKey = "";
   const display = text || attachments.map((item) => item.name).join(", ");
   addMessage("user", display, wasBusy ? t("added to running task") : (attachments.length ? t("{count} image", { count: attachments.length }) : ""), attachments);
-  addStatusLine(wasBusy ? t("Sent to the running task; waiting for Pilot to react.") : t("Submitted task; waiting for Pilot stream."));
+  addStatusLine(
+    wasBusy ? t("Sent to the running task; waiting for Pilot to react.") : t("Submitted task; waiting for Pilot stream."),
+    "activity",
+    wasBusy ? "Sent to the running task; waiting for Pilot to react." : "Submitted task; waiting for Pilot stream.",
+  );
   addTimeline("task", wasBusy ? t("added: {text}", { text: display }) : t("task: {text}", { text: display }));
   persistCurrentConversation(display);
   $("taskInput").value = "";
@@ -1011,7 +1063,9 @@ function stopCurrentTask() {
   const button = $("stopButton");
   button.disabled = true;
   setButtonLabel(button, t("Aborting"));
-  addStatusLine(t("Abort requested; canceling every running task and any robot motion."));
+  // Everything after this point is teardown; keep the transcript folded.
+  state.turnReplied = true;
+  addStatusLine(t("Abort requested; canceling every running task and any robot motion."), "milestone", "Abort requested; canceling every running task and any robot motion.");
   addTimeline("cancel", state.activeTurnId
     ? t("abort requested for {turn}", { turn: state.activeTurnId })
     : t("abort requested"));
@@ -1076,7 +1130,7 @@ function finishVoiceCapture() {
     button.disabled = true;
     setButtonLabel(button, t("Stopping"));
   }
-  addStatusLine(t("Stopping recording; submitting what has been recognized so far."));
+  addStatusLine(t("Stopping recording; submitting what has been recognized so far."), "activity", "Stopping recording; submitting what has been recognized so far.");
   const send = () => {
     if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "finish" }));
   };
@@ -1086,16 +1140,18 @@ function finishVoiceCapture() {
 
 function startVoice() {
   if (state.voiceActive) {
-    addStatusLine(t("Voice recording is already active."));
+    addStatusLine(t("Voice recording is already active."), "activity", "Voice recording is already active.");
     return;
   }
   const wasBusy = hasActiveTurn();
   state.voiceActive = true;
+  state.turnReplied = false;
+  state.lastTaskStatusKey = "";
   maybe("voiceButton")?.classList.add("active");
   document.querySelectorAll("[data-page-action='voice-start']").forEach((button) => button.classList.add("active"));
   if (maybe("voiceState")) $("voiceState").textContent = t("recording");
   syncVoiceControls();
-  addStatusLine(t("Listening for voice input."));
+  addStatusLine(t("Listening for voice input."), "activity", "Listening for voice input.");
   addTimeline("voice", wasBusy ? t("voice input for running task") : t("voice session requested"));
   const socket = new WebSocket(wsUrl("/ws/voice"));
   beginStream(socket);
@@ -1135,7 +1191,15 @@ function wireStream(socket, done, voiceSocket = null) {
     }
     if (payload.type === "pilot_event") handlePilotEvent(payload.event);
     if (payload.type === "voice_event") handleVoiceEvent(payload.event, voiceSocket);
-    if (payload.type === "accepted") addStatusLine(t("Connected; waiting for Robonix events."));
+    if (payload.type === "accepted") {
+      addTimeline("status", t("Connected; waiting for Robonix events."));
+      // One connection milestone per page session; every task/voice/abort
+      // stream re-sends "accepted" and used to flood the transcript.
+      if (!state.connectionAnnounced) {
+        state.connectionAnnounced = true;
+        addStatusLine(t("Connected; waiting for Robonix events."), "milestone", "Connected; waiting for Robonix events.");
+      }
+    }
     if (payload.type === "status") addTimeline("status", payload.message || t("status"));
     if (payload.type === "finish_requested") {
       addTimeline(payload.ok ? "voice" : "error", payload.detail || (payload.ok ? t("recording stop requested") : t("could not stop recording")));
@@ -1202,7 +1266,20 @@ function handlePilotEvent(event) {
     }
     setBusy(state.activeStreams > 0 || state.taskRunning);
     addTimeline("status", t(event.taskState.status || event.taskState.goal || "task update"));
-    addStatusLine(t(event.taskState.status || event.taskState.goal || "Task state updated."));
+    const taskKey = `${taskStatus}|${String(event.taskState.goal || "")}`;
+    const taskChanged = taskKey !== state.lastTaskStatusKey;
+    if (taskChanged) state.lastTaskStatusKey = taskKey;
+    // A finished task can arrive without a final reply; fold the activity run
+    // instead of leaving it stuck open until the socket closes.
+    if (["done", "completed", "failed", "cancelled", "canceled", "aborted"].includes(taskStatus)) {
+      state.turnReplied = true;
+    }
+    if (taskChanged) {
+      const taskText = event.taskState.status || event.taskState.goal || "Task state updated.";
+      addStatusLine(t(taskText), "activity", taskText);
+    }
+    // Dedupe can swallow the line above; the fold still has to happen.
+    if (state.turnReplied) renderMessages();
     renderPlan();
     persistCurrentConversation();
   } else if (event.kind === "status" && event.status) {
@@ -1210,19 +1287,26 @@ function handlePilotEvent(event) {
     if (turnMatch) {
       state.activeTurnId = turnMatch[1];
       state.activePilotSessionId = String(event.status.sessionId || event.sessionId || "");
+      // A new turn is waiting for its answer again.
+      state.turnReplied = false;
+      state.lastTaskStatusKey = "";
       return;
     }
     if ([1, 2].includes(Number(event.status.state))) {
       state.activeTurnId = "";
       state.activePilotSessionId = "";
       state.taskRunning = false;
+      // The turn is over even if the socket lingers for TTS: fold the run.
+      state.turnReplied = true;
       setBusy(state.activeStreams > 0);
     }
     addTimeline(
       "status",
       event.status.message ? t(event.status.message) : t("state {state}", { state: event.status.state }),
     );
-    if (event.status.message) addStatusLine(t(event.status.message));
+    if (event.status.message) {
+      addStatusLine(t(event.status.message), "activity", event.status.message);
+    }
   }
 }
 
@@ -1266,6 +1350,10 @@ function handleVoiceEvent(event, sourceSocket = null) {
   }
   if (event.kind === "asr_final") {
     const mode = sourceSocket?.robonixVoiceMode || "voice";
+    // The recognized utterance opens a new turn: its activity run starts
+    // unfolded again.
+    state.turnReplied = false;
+    state.lastTaskStatusKey = "";
     addMessage("user", event.text, mode);
     if (sourceSocket && state.activeVoiceSocket === sourceSocket) {
       state.activeVoiceSocket = null;
@@ -1278,12 +1366,15 @@ function handleVoiceEvent(event, sourceSocket = null) {
     handlePilotEvent(event.pilot);
   } else if (event.kind === "tts_started") {
     setTtsAura(true);
-    addMessage("status", label || t("TTS playback started"));
+    const ttsKey = label || "TTS playback started";
+    addStatusLine(t(ttsKey), "activity", ttsKey);
     addTimeline("voice", label || t("TTS playback started"));
   } else if (event.kind === "tts_done") {
     setTtsAura(false);
     const skipped = String(label || "").toLowerCase().includes("skipped");
-    addMessage(skipped ? "error" : "status", label || t("TTS playback done"));
+    const ttsKey = label || "TTS playback done";
+    if (skipped) addMessage("error", t(ttsKey));
+    else addStatusLine(t(ttsKey), "activity", ttsKey);
     addTimeline(skipped ? "error" : "voice", label || t("TTS playback done"));
   } else if (event.kind === "error") {
     addMessage("error", event.error || t("voice error"));
@@ -1316,9 +1407,9 @@ function hasActiveTurn() {
   return state.taskRunning;
 }
 
-function addMessage(role, text, meta = "", attachments = []) {
+function addMessage(role, text, meta = "", attachments = [], extra = {}) {
   const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  state.messages.push({ id, role, text, meta, attachments });
+  state.messages.push({ at: Date.now(), ...extra, id, role, text, meta, attachments });
   if (role !== "agent") state.activeAgentId = null;
   renderMessages();
   renderSceneAssets();
@@ -1326,12 +1417,21 @@ function addMessage(role, text, meta = "", attachments = []) {
   return id;
 }
 
-function addStatusLine(text) {
+/// Ambient narration. `kind` is "activity" for the folded activity group and
+/// "milestone" for lifecycle notices (new session, abort) that deserve their
+/// own centered divider.
+function addStatusLine(text, kind = "activity", i18nKey = "", i18nParams = null) {
   const clean = String(text || "").trim();
   if (!clean) return null;
+  const now = Date.now();
   const last = state.messages[state.messages.length - 1];
-  if (last?.role === "status" && last.text === clean) return last.id;
-  return addMessage("status", clean, "status");
+  if (last?.role === "status" && last.text === clean && now - (last.at || 0) < 5000) {
+    return last.id;
+  }
+  return addMessage("status", clean, "", [], {
+    statusKind: kind,
+    ...(i18nKey ? { i18nKey, i18nParams } : {}),
+  });
 }
 
 function announcePlan(plan) {
@@ -1342,14 +1442,18 @@ function announcePlan(plan) {
   const calls = planCalls(plan);
   const names = calls.map((node) => capabilityLabel(node)).filter(Boolean);
   const preview = names.slice(0, 3).join(", ");
-  const suffix = names.length > 3 ? ` +${names.length - 3} more` : "";
-  const id = addMessage(
+  const suffix = names.length > 3
+    ? ` ${t("and {count} more", { count: names.length - 3 })}`
+    : "";
+  const i18nKey = names.length ? "Calling {names}" : "RTDL plan round {round}";
+  const i18nParams = names.length ? { names: `${preview}${suffix}` } : { round };
+  addMessage(
     "status",
-    names.length ? `Calling ${preview}${suffix}` : `RTDL plan round ${round}`,
-    "RTDL",
+    t(i18nKey, i18nParams),
+    "",
+    [],
+    { statusKind: "plan", planRound: round, planNames: names, i18nKey, i18nParams },
   );
-  const msg = state.messages.find((item) => item.id === id);
-  if (msg) msg.planRound = round;
 }
 
 // Streamed chunks are persisted on a short delay: writing localStorage on every
@@ -1367,6 +1471,8 @@ function scheduleAgentPersist() {
 }
 
 function appendAgent(text) {
+  // The reply has begun: activity groups above it should fold immediately.
+  state.turnReplied = true;
   if (!state.activeAgentId) {
     state.activeAgentId = addMessage("agent", "", "Robonix");
   }
@@ -1399,6 +1505,8 @@ function finalizeAgent(text) {
     state.activeAgentId = null;
     return;
   }
+  // Covers replies that arrive as one final_text with no streamed chunks.
+  state.turnReplied = true;
   // Status lines interleaved mid-turn clear `activeAgentId` (addMessage drops it
   // for every non-agent role), so a FinalText arriving right after a status such
   // as "Plan control accepted" would open a second bubble for text that was
@@ -1610,57 +1718,225 @@ function appendInline(parent, text) {
   }
 }
 
+/// Status lines and plan announcements form the ambient activity run that
+/// folds between conversational turns. Milestones stay outside the run.
+function isActivityMessage(message) {
+  if (message.role !== "status") return false;
+  const kind = message.statusKind || (message.planRound ? "plan" : "activity");
+  return kind !== "milestone";
+}
+
+function activityTime(message) {
+  return message.at ? new Date(message.at).toLocaleTimeString() : "";
+}
+
+function activityLink(message) {
+  if (!message.planRound) return null;
+  const action = document.createElement("button");
+  action.type = "button";
+  action.className = "message-link";
+  action.textContent = t("Show RTDL");
+  action.addEventListener("click", () => {
+    openRtdlHistory();
+  });
+  return action;
+}
+
+/// Status text is stored together with its i18n key when the client authored
+/// it, so switching language re-renders the transcript instead of leaving the
+/// old language behind. Messages without a key keep their raw text.
+function messageText(message) {
+  if (!message) return "";
+  if (message.statusKind === "plan" && Array.isArray(message.planNames)) {
+    if (!message.planNames.length) {
+      return t("RTDL plan round {round}", { round: message.planRound });
+    }
+    const preview = message.planNames.slice(0, 3).join(", ");
+    const suffix = message.planNames.length > 3
+      ? ` ${t("and {count} more", { count: message.planNames.length - 3 })}`
+      : "";
+    return t("Calling {names}", { names: `${preview}${suffix}` });
+  }
+  if (message.i18nKey) return t(message.i18nKey, message.i18nParams || undefined);
+  // Rows persisted before i18nKey existed only carry text, which may be the
+  // English key or an already translated Chinese value.
+  if (message.role === "status") return window.RobonixI18N?.translateStored?.(message.text) || message.text || "";
+  return message.text || "";
+}
+
+function activityRow(message) {
+  const row = document.createElement("div");
+  row.className = "activity-row";
+  const stamp = activityTime(message);
+  if (stamp) {
+    const time = document.createElement("span");
+    time.className = "activity-time";
+    time.textContent = stamp;
+    row.appendChild(time);
+  }
+  const text = document.createElement("span");
+  text.className = "activity-text";
+  text.textContent = messageText(message);
+  row.appendChild(text);
+  const link = activityLink(message);
+  if (link) row.appendChild(link);
+  return row;
+}
+
+/// One lone status is already a single line, so it does not earn a disclosure
+/// control; the group header only appears once there is something to fold.
+function renderActivityLine(message, live) {
+  const line = document.createElement("div");
+  line.className = `activity-line${live ? " live" : ""}`;
+  const dot = document.createElement("span");
+  dot.className = "activity-dot";
+  line.appendChild(dot);
+  line.appendChild(activityRow(message));
+  return line;
+}
+
+/// `live` is true while we are still waiting for the robot's reply and this is
+/// the newest block on screen: the run stays open and follows its own tail.
+function renderActivityGroup(entries, live) {
+  const key = entries[0].id;
+  const stored = state.expandedActivities.get(key);
+  const open = stored === undefined ? live : stored;
+  const group = document.createElement("section");
+  group.className = `activity-group${live ? " live" : ""}${open ? " open" : ""}`;
+
+  const summary = document.createElement("button");
+  summary.type = "button";
+  summary.className = "activity-summary";
+  summary.setAttribute("aria-expanded", String(open));
+  summary.title = t(open ? "Collapse activity" : "Expand activity");
+
+  const dot = document.createElement("span");
+  dot.className = "activity-dot";
+  const count = document.createElement("span");
+  count.className = "activity-count";
+  count.textContent = t("{count} activity events", { count: entries.length });
+  const preview = document.createElement("span");
+  preview.className = "activity-preview";
+  preview.textContent = messageText(entries[entries.length - 1]);
+  const chevron = document.createElement("span");
+  chevron.className = "activity-chevron";
+  chevron.setAttribute("aria-hidden", "true");
+  chevron.textContent = "▾";
+  summary.append(dot, count, preview, chevron);
+
+  const body = document.createElement("div");
+  body.className = "activity-body";
+  body.hidden = !open;
+  entries.forEach((entry) => body.appendChild(activityRow(entry)));
+
+  summary.addEventListener("click", () => {
+    const next = summary.getAttribute("aria-expanded") !== "true";
+    state.expandedActivities.set(key, next);
+    summary.setAttribute("aria-expanded", String(next));
+    summary.title = t(next ? "Collapse activity" : "Expand activity");
+    group.classList.toggle("open", next);
+    body.hidden = !next;
+    if (next) body.scrollTop = body.scrollHeight;
+  });
+
+  group.append(summary, body);
+  return group;
+}
+
+function renderActivityRun(entries, live) {
+  return entries.length === 1
+    ? renderActivityLine(entries[0], live)
+    : renderActivityGroup(entries, live);
+}
+
+function renderMessageElement(message) {
+  if (message.role === "status" && message.statusKind === "milestone") {
+    const divider = document.createElement("div");
+    divider.className = "status-divider";
+    divider.textContent = messageText(message);
+    return divider;
+  }
+  const el = document.createElement("div");
+  el.className = `message ${message.role}`;
+  el.dataset.messageId = message.id;
+  // Legacy status rows carried meta="status"; the label is noise and the role
+  // is already obvious from the styling.
+  if (message.meta && message.role !== "status") {
+    const meta = document.createElement("span");
+    meta.className = "meta";
+    meta.textContent = message.meta;
+    el.appendChild(meta);
+  }
+  if (message.role === "agent") {
+    const body = document.createElement("div");
+    body.className = "agent-markdown-body";
+    appendAgentMarkdown(body, message);
+    el.appendChild(body);
+  } else {
+    el.appendChild(document.createTextNode(message.text));
+  }
+  if (Array.isArray(message.attachments) && message.attachments.length) {
+    const images = document.createElement("div");
+    images.className = "message-images";
+    message.attachments.forEach((item) => {
+      const img = document.createElement("img");
+      img.src = item.dataUrl;
+      img.alt = item.name || t("attachment");
+      images.appendChild(img);
+    });
+    el.appendChild(images);
+  }
+  return el;
+}
+
 function renderMessages() {
   const root = $("messages");
+  if (!root) return;
+  // Only follow the tail when the reader is already there; status bursts must
+  // not yank the view away from history the user is reading.
+  const stick = root.scrollHeight - root.scrollTop - root.clientHeight < 80;
   clear(root);
   if (state.messages.length === 0) {
     const empty = document.createElement("div");
-    empty.className = "message status";
+    empty.className = "empty-chat";
     empty.textContent = t("Ready");
     root.appendChild(empty);
   }
+
+  const blocks = [];
+  let run = [];
+  const flushRun = () => {
+    if (!run.length) return;
+    blocks.push({ activity: run });
+    run = [];
+  };
   state.messages.forEach((message) => {
-    const el = document.createElement("div");
-    el.className = `message ${message.role}`;
-    el.dataset.messageId = message.id;
-    if (message.meta) {
-      const meta = document.createElement("span");
-      meta.className = "meta";
-      meta.textContent = message.meta;
-      el.appendChild(meta);
+    if (isActivityMessage(message)) {
+      run.push(message);
+      return;
     }
-    if (message.role === "agent") {
-      const body = document.createElement("div");
-      body.className = "agent-markdown-body";
-      appendAgentMarkdown(body, message);
-      el.appendChild(body);
-    } else {
-      el.appendChild(document.createTextNode(message.text));
-    }
-    if (message.planRound) {
-      const action = document.createElement("button");
-      action.type = "button";
-      action.className = "message-link";
-      action.textContent = t("Show RTDL");
-      action.addEventListener("click", () => {
-        openRtdlHistory();
-      });
-      el.appendChild(action);
-    }
-    if (Array.isArray(message.attachments) && message.attachments.length) {
-      const images = document.createElement("div");
-      images.className = "message-images";
-      message.attachments.forEach((item) => {
-        const img = document.createElement("img");
-        img.src = item.dataUrl;
-        img.alt = item.name || t("attachment");
-        images.appendChild(img);
-      });
-      el.appendChild(images);
-    }
-    root.appendChild(el);
+    flushRun();
+    blocks.push({ message });
   });
-  root.scrollTop = root.scrollHeight;
+  flushRun();
+
+  blocks.forEach((block, index) => {
+    if (block.activity) {
+      const live = index === blocks.length - 1
+        && !state.turnReplied
+        && (state.busy || state.taskRunning);
+      const el = renderActivityRun(block.activity, live);
+      root.appendChild(el);
+      if (live) {
+        const body = el.querySelector(".activity-body");
+        if (body && !body.hidden) body.scrollTop = body.scrollHeight;
+      }
+      return;
+    }
+    root.appendChild(renderMessageElement(block.message));
+  });
+
+  if (stick) root.scrollTop = root.scrollHeight;
 }
 
 function addTimeline(kind, text) {
@@ -1673,6 +1949,9 @@ function addTimeline(kind, text) {
 function renderTimeline() {
   setTextAll("[data-event-summary]", String(state.timeline.length));
   setTextAll("[data-current-task-label]", t("Current Task: {task}", { task: currentTaskLabel() }));
+  document.querySelectorAll("[data-task-status-chip]").forEach((chip) => {
+    chip.classList.toggle("running", Boolean(state.taskRunning));
+  });
   const rows = state.timeline;
   document.querySelectorAll("[data-event-list]").forEach((root) => {
     clear(root);
@@ -1698,8 +1977,9 @@ function renderPlan() {
   const records = normalizedPlanRecords();
   const activeRecords = records.filter((record) => recordIsActive(record));
   const latestActiveRecord = activeRecords[0] || null;
-  // Retain the active plan if running; otherwise retain the most recent completed plan
-  // so the execution tree doesn't flash and disappear in an instant!
+  // Keep the running plan if there is one; otherwise keep the most recent
+  // completed plan so the execution tree does not flash and vanish on the
+  // next executor poll.
   const displayRecord = latestActiveRecord || records[0] || null;
   const historyRecords = records.filter((record) => record !== displayRecord);
   const displayCalls = planCalls(displayRecord?.plan).length;
@@ -1724,7 +2004,6 @@ function renderPlan() {
   if (maybe("rtdlHistoryCount")) $("rtdlHistoryCount").textContent = String(historyRecords.length);
   renderGoalPanel();
   renderSceneAssets();
-
   if (!displayRecord) {
     roots.forEach((root) => {
       const empty = document.createElement("div");
@@ -1733,11 +2012,13 @@ function renderPlan() {
       root.appendChild(empty);
     });
   } else {
-    roots.forEach((root) => renderPlanRecord(root, displayRecord));
+    roots.forEach((root) => renderPlanRecord(root, displayRecord, showNodeDetail));
   }
   renderPlanHistory(historyRecords);
-
   const newest = displayRecord;
+  // While the node-detail popup is open, keep showing the node the user clicked
+  // instead of letting the executor poll overwrite it every couple of seconds.
+  if (!maybe("nodeDetailModal")?.hidden) return;
   if (!newest) return renderExecutionDetail(null, "PENDING");
   const maps = buildResultMaps(newest);
   const runningIndex = pickRunningIndex(newest.plan, maps.byIndex);
@@ -1780,6 +2061,182 @@ function renderPlanHistory(records) {
   }
 }
 
+const treeViewStates = new Map();
+const treeResizeObservers = new Map();
+
+// Map-style interaction for the RTDL tree: drag to pan, wheel to zoom (around
+// the cursor), double click to reset. The view is stored by planId so the
+// periodic re-render of the tree keeps the user's zoom and position.
+function enableTreePanZoom(planId, viewport, svg) {
+  if (!svg) return;
+
+  // Read dimensions from viewBox instead of width/height attributes
+  const viewBox = svg.getAttribute("viewBox");
+  const [, , svgWidth, svgHeight] = viewBox ? viewBox.split(/\s+/).map(Number) : [0, 0, 1, 1];
+  let view = treeViewStates.get(planId);
+  let dragging = false;
+  let dragDistance = 0;
+  let lastX = 0;
+  let lastY = 0;
+
+  // A re-render replaces the viewport, so the previous observer is stale.
+  treeResizeObservers.get(planId)?.disconnect();
+  treeResizeObservers.delete(planId);
+
+  // The transform starts at the padding box, so the tree may only use the area
+  // inside the padding. Measuring clientWidth instead offsets the tree by the
+  // padding and clips it on the opposite side. The styles are read lazily
+  // because the viewport is still detached when this runs.
+  let pad = null;
+  const boxSize = () => {
+    // A detached element has no computed style, so wait until it is inserted.
+    if (!pad && viewport.isConnected) {
+      const style = getComputedStyle(viewport);
+      pad = {
+        left: parseFloat(style.paddingLeft) || 0,
+        top: parseFloat(style.paddingTop) || 0,
+        x: (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0),
+        y: (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0),
+      };
+    }
+    return {
+      width: viewport.clientWidth - (pad ? pad.x : 0),
+      height: viewport.clientHeight - (pad ? pad.y : 0),
+    };
+  };
+
+  const clampView = () => {
+    const { width: boxWidth, height: boxHeight } = boxSize();
+    if (!boxWidth || !boxHeight) return;
+    const contentWidth = svgWidth * view.scale;
+    const contentHeight = svgHeight * view.scale;
+    // Only clamp when content is larger than viewport
+    if (contentWidth > boxWidth) {
+      view.x = Math.min(0, Math.max(boxWidth - contentWidth, view.x));
+    }
+    if (contentHeight > boxHeight) {
+      view.y = Math.min(0, Math.max(boxHeight - contentHeight, view.y));
+    }
+  };
+
+  const apply = () => {
+    clampView();
+    svg.style.transform = `translate(${Math.round(view.x)}px, ${Math.round(view.y)}px) scale(${view.scale})`;
+  };
+
+  const fitView = () => {
+    const { width: boxWidth, height: boxHeight } = boxSize();
+    // The tree can render while its panel is hidden (another page or the event
+    // log tab), where the viewport has no measurable size. Centering against a
+    // zero-sized box would push the tree off-screen, so wait for layout.
+    if (!boxWidth || !boxHeight) return;
+    const fit = Math.min(1, (boxWidth - 20) / svgWidth, (boxHeight - 20) / svgHeight);
+    view.scale = Math.max(0.4, fit);
+    // Center the content
+    view.x = (boxWidth - svgWidth * view.scale) / 2;
+    view.y = (boxHeight - svgHeight * view.scale) / 2;
+    view.fitted = true;
+    view.touched = false;
+    apply();
+  };
+
+  if (view) {
+    apply();
+    if (!view.fitted) requestAnimationFrame(fitView);
+  } else {
+    view = { scale: 1, x: 0, y: 0, fitted: false, touched: false };
+    treeViewStates.set(planId, view);
+    apply();
+    // First render only: measure once the viewport is in the document.
+    requestAnimationFrame(fitView);
+  }
+
+  // The panel is still settling on the first frame (and changes size when it is
+  // revealed or the window is resized), so keep the tree centered until the
+  // user pans or zooms. Afterwards the stored view wins.
+  if (typeof ResizeObserver !== "undefined") {
+    const observer = new ResizeObserver(() => {
+      if (view.touched) apply();
+      else fitView();
+    });
+    treeResizeObservers.set(planId, observer);
+    observer.observe(viewport);
+  }
+
+  viewport.addEventListener("wheel", (event) => {
+    if (!event.deltaY) return;
+    event.preventDefault();
+    const box = viewport.getBoundingClientRect();
+    // The stored offset is relative to the content box, so drop the padding.
+    const px = event.clientX - box.left - (pad ? pad.left : 0);
+    const py = event.clientY - box.top - (pad ? pad.top : 0);
+    const next = Math.min(4, Math.max(0.4, view.scale * (event.deltaY < 0 ? 1.12 : 1 / 1.12)));
+    const ratio = next / view.scale;
+    view.x = px - (px - view.x) * ratio;
+    view.y = py - (py - view.y) * ratio;
+    view.scale = next;
+    view.touched = true;
+    apply();
+  }, { passive: false });
+
+  viewport.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    dragging = true;
+    dragDistance = 0;
+    lastX = event.clientX;
+    lastY = event.clientY;
+  });
+
+  viewport.addEventListener("pointermove", (event) => {
+    if (!dragging) return;
+    // The pointer was released outside the viewport before capture started.
+    if (event.buttons === 0) {
+      endDrag(event);
+      return;
+    }
+    const dx = event.clientX - lastX;
+    const dy = event.clientY - lastY;
+    lastX = event.clientX;
+    lastY = event.clientY;
+    dragDistance += Math.abs(dx) + Math.abs(dy);
+    if (dragDistance > 4) {
+      // Capture only once it is a real drag, so a plain click still reaches the
+      // node underneath and opens its detail popup.
+      viewport.classList.add("panning");
+      viewport.setPointerCapture?.(event.pointerId);
+    }
+    if (dragDistance <= 4) return;
+    view.x += dx;
+    view.y += dy;
+    view.touched = true;
+    apply();
+  });
+
+  const endDrag = (event) => {
+    if (!dragging) return;
+    dragging = false;
+    viewport.classList.remove("panning");
+    viewport.releasePointerCapture?.(event.pointerId);
+  };
+  viewport.addEventListener("pointerup", endDrag);
+  viewport.addEventListener("pointercancel", endDrag);
+
+  viewport.addEventListener("click", (event) => {
+    if (dragDistance <= 4) {
+      dragDistance = 0;
+      return;
+    }
+    // The drag ended on a node: swallow the click so it does not open the popup.
+    dragDistance = 0;
+    event.stopPropagation();
+    event.preventDefault();
+  }, true);
+
+  viewport.addEventListener("dblclick", () => {
+    fitView();
+  });
+}
+
 function renderBehaviorTree(root, plan, resultMaps, runningIndex, onSelect = renderExecutionDetail) {
   const nodes = plan?.nodes || [];
   const nodeStateByIndex = resultMaps.byIndex;
@@ -1795,6 +2252,7 @@ function renderBehaviorTree(root, plan, resultMaps, runningIndex, onSelect = ren
   });
   if (!treeRoots.length && nodes.length) treeRoots.push(nodes[0]);
 
+  const planId = String(plan.planId || "");
   treeRoots.forEach((treeRoot, treeIndex) => {
     const status = aggregateNodeStatus(treeRoot, plan, resultMaps, runningIndex);
     const card = document.createElement("div");
@@ -1811,7 +2269,10 @@ function renderBehaviorTree(root, plan, resultMaps, runningIndex, onSelect = ren
     header.append(title, pill);
     const viewport = document.createElement("div");
     viewport.className = "bt-tree-viewport";
-    viewport.appendChild(makeBehaviorTreeSvg(treeRoot, plan, resultMaps, runningIndex, onSelect));
+    const svg = makeBehaviorTreeSvg(treeRoot, plan, resultMaps, runningIndex, onSelect);
+    viewport.appendChild(svg);
+    const viewKey = planId ? `${planId}-${treeIndex}` : `tree-${treeIndex}`;
+    enableTreePanZoom(viewKey, viewport, svg);
     card.append(header, viewport);
     root.appendChild(card);
   });
@@ -1853,6 +2314,9 @@ function makeBehaviorTreeSvg(treeRoot, plan, resultMaps, runningIndex, onSelect 
   const svg = document.createElementNS(ns, "svg");
   svg.setAttribute("class", "bt-svg");
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  // Size the element like the drawing itself. Without this the SVG stretches to
+  // the panel, the browser fits the viewBox inside it, and the pan/zoom
+  // transform ends up scaling a box that no longer matches the tree.
   svg.setAttribute("width", String(width));
   svg.setAttribute("height", String(height));
 
@@ -1957,7 +2421,7 @@ function makePlanRow(node, status, depth, runningIndex) {
   meta.append(type, provider);
   body.append(top, meta);
   row.append(rail, body);
-  row.addEventListener("click", () => renderExecutionDetail(node, status));
+  row.addEventListener("click", () => showNodeDetail(node, status));
   return row;
 }
 
@@ -2080,7 +2544,7 @@ function durationForNode(node, status) {
 function startedForNode(node, status) {
   const result = nodeResult(node);
   const value = result?.startedAt || result?.started_at || result?.startTime || result?.start_time;
-  if (!value) return statusKey(status) === "pending" ? "-" : "";
+  if (!value) return "-";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
@@ -2153,13 +2617,11 @@ function renderActivePlans(error = "") {
   if (state.activePage !== "dashboard") return;
   const root = maybe("activeRtdlList");
   const count = maybe("activeRtdlCount");
-  const summary = maybe("activeRtdlSummary");
   const modalSummary = maybe("activeRtdlModalSummary");
   if (!root || !count) return;
   clear(root);
   if (error) {
     count.textContent = t("unavailable");
-    if (summary) summary.textContent = t("Executor state unavailable");
     if (modalSummary) modalSummary.textContent = t("Live Executor query failed");
     const row = document.createElement("div");
     row.className = "active-rtdl-empty error";
@@ -2169,7 +2631,6 @@ function renderActivePlans(error = "") {
   }
   const planCount = state.executorPlans.length;
   count.textContent = String(planCount);
-  if (summary) summary.textContent = planCount ? t("{count} running · open live workspace", { count: planCount }) : t("No plans running");
   if (modalSummary) modalSummary.textContent = t(
     planCount === 1 ? "{count} live plan reported by Executor" : "{count} live plans reported by Executor",
     { count: planCount },
@@ -2240,9 +2701,14 @@ function displayStatus(status) {
   return t(statusKey(status).toUpperCase());
 }
 
+// Last node shown in each detail pane. The args payload embeds translated
+// status text, so an open popup has to be re-rendered after a language switch;
+// renderPlan() intentionally leaves the live popup untouched in the meantime.
+const detailSelections = { live: null, history: null };
+
 function renderExecutionDetail(node, status, nodeState = null) {
   if (!maybe("activeProvider")) return;
-  if (maybe("executionDetailTitle")) $("executionDetailTitle").textContent = node ? t("Node detail") : t("Node detail");
+  detailSelections.live = node ? { node, status, nodeState } : null;
   if (!node) {
     $("activeProvider").textContent = "-";
     $("activeStarted").textContent = "-";
@@ -2258,6 +2724,7 @@ function renderExecutionDetail(node, status, nodeState = null) {
 
 function renderHistoryExecutionDetail(node, status, nodeState = null) {
   if (!maybe("historyActiveProvider")) return;
+  detailSelections.history = node ? { node, status, nodeState } : null;
   if (maybe("historyExecutionDetailTitle")) {
     $("historyExecutionDetailTitle").textContent = node ? nodeLabel(node) : t("Node detail");
   }
@@ -2395,26 +2862,9 @@ function renderGoalPanel() {
   const active = context?.node || null;
   const taskText = task.goal || task.task || firstUserMessage() || t("waiting for task");
   const status = task.status || (context ? "executing" : "idle");
-  const isExecuting = status === "executing" || Boolean(context?.op) || (Boolean(context?.node) && status !== "idle");
-
-  if (maybe("goalLine")) {
-    $("goalLine").textContent = taskText;
-  }
-
-  const badge = maybe("cockpitStatusBadge");
-  if (badge) {
-    badge.className = `cockpit-status-badge ${isExecuting ? "executing" : "idle"}`;
-    const statusTextEl = maybe("cockpitStatusText");
-    if (statusTextEl) statusTextEl.textContent = isExecuting ? t("EXECUTING") : t("IDLE");
-  }
-
+  if (maybe("goalLine")) $("goalLine").textContent = t("{status}: {task}", { status: t(status), task: taskText });
   document.querySelectorAll("[data-goal-preview]").forEach((goal) => {
     clear(goal);
-    if (!context) {
-      goal.style.display = "none";
-      return;
-    }
-    goal.style.display = "";
     const card = document.createElement("div");
     card.className = "goal-card";
     const source = document.createElement("span");
@@ -2428,23 +2878,31 @@ function renderGoalPanel() {
       || context?.plan?.description
       || t("No active Executor call");
     card.append(source, title);
-    const fields = document.createElement("div");
-    fields.className = "goal-call-grid";
-    const providerId = active?.call?.providerId || context.op?.provider_id || context.op?.providerId || "-";
-    const contractId = active?.call?.contractId || context.op?.contract_id || context.op?.contractId || "-";
-    appendGoalField(fields, t("Provider"), providerId);
-    appendGoalField(fields, t("Contract"), contractId);
-    appendGoalField(
-      fields,
-      t("Operation"),
-      active?.call?.name || (contractId !== "-" ? contractId.split("/").pop() : "") || context.op?.description || nodeLabel(active || {}),
-    );
-    appendGoalField(
-      fields,
-      t("Plan / node"),
-      `${context.plan?.planId || "-"} / ${context.op?.op_id || context.op?.opId || active?.opId || active?.index || "-"}`,
-    );
-    card.appendChild(fields);
+    if (context) {
+      const fields = document.createElement("div");
+      fields.className = "goal-call-grid";
+      const providerId = active?.call?.providerId || context.op?.provider_id || context.op?.providerId || "-";
+      const contractId = active?.call?.contractId || context.op?.contract_id || context.op?.contractId || "-";
+      appendGoalField(fields, t("Provider"), providerId);
+      appendGoalField(fields, t("Contract"), contractId);
+      appendGoalField(
+        fields,
+        t("Operation"),
+        active?.call?.name || (contractId !== "-" ? contractId.split("/").pop() : "") || context.op?.description || nodeLabel(active || {}),
+      );
+      appendGoalField(
+        fields,
+        t("Plan / node"),
+        `${context.plan?.planId || "-"} / ${context.op?.op_id || context.op?.opId || active?.opId || active?.index || "-"}`,
+      );
+      card.appendChild(fields);
+    } else {
+      const empty = document.createElement("span");
+      empty.textContent = state.executorPlansReady
+        ? t("Executor reports no running RTDL plan.")
+        : t("Connect to Executor to read the authoritative running call.");
+      card.appendChild(empty);
+    }
     const target = goalSummary(active);
     if (target) {
       const detail = document.createElement("pre");
@@ -2804,7 +3262,7 @@ function renameConversation(sessionId) {
   // window.prompt blocks the event loop, which would stall a live event
   // stream, so renaming waits. Say so rather than ignoring the click.
   if (state.busy) {
-    addStatusLine(t("Renaming is unavailable while a task is running."));
+    addStatusLine(t("Renaming is unavailable while a task is running."), "milestone", "Renaming is unavailable while a task is running.");
     return;
   }
   if (sessionId === state.sessionId) persistCurrentConversation("", true);
@@ -2889,7 +3347,7 @@ function openConversation(sessionId) {
   // screen, so switching mid-flight would file another session's replies
   // here. Refuse, but say why -- returning silently reads as a dead list.
   if (state.busy) {
-    addStatusLine(t("A task is still running in this session. Abort it before switching conversations."));
+    addStatusLine(t("A task is still running in this session. Abort it before switching conversations."), "milestone", "A task is still running in this session. Abort it before switching conversations.");
     return;
   }
   persistCurrentConversation();
@@ -3514,7 +3972,14 @@ function setButtonLabel(node, text) {
 }
 
 function setBusy(value) {
+  const wasBusy = state.busy;
   state.busy = value;
+  // Idle is the final "reply is over" signal for streams that end without a
+  // final_text or a terminal task state.
+  if (wasBusy && !value && !state.turnReplied) {
+    state.turnReplied = true;
+    renderMessages();
+  }
   const sendBtn = maybe("sendButton");
   if (sendBtn) {
     sendBtn.classList.toggle("busy", value);
@@ -4891,9 +5356,10 @@ function renderStudioTabs() {
     btn.type = "button";
     btn.className = `studio-service-tab${s.port === activeStudioPort ? " active" : ""}`;
     btn.dataset.studioPort = String(s.port);
-    const titleText = `${s.name || s.title} (Port ${s.port})`;
-    btn.title = titleText;
-    btn.setAttribute("data-i18n-title", titleText);
+    // Localized here rather than via data-i18n-title: the label is composed
+    // from a discovered name and a port, so there is no fixed dictionary key.
+    // handleI18nChange() re-renders these tabs on every language switch.
+    btn.title = `${t(s.name || s.title || "")} (Port ${s.port})`;
 
     const iconSpan = document.createElement("span");
     iconSpan.className = "tab-icon";
@@ -4927,13 +5393,17 @@ function renderStudioEmptyState(show) {
       emptyEl.innerHTML = `
         <div class="studio-empty-icon">📡</div>
         <h3 data-i18n="No Web services detected on this robot">${t("No Web services detected on this robot")}</h3>
-        <p class="studio-empty-desc">${t("Robot Host")}: ${getStudioHost()}</p>
+        <p class="studio-empty-desc"><span data-i18n="Robot Host">${t("Robot Host")}</span>: <code class="studio-empty-host"></code></p>
         <button type="button" class="studio-empty-scan-btn" id="studioEmptyScanBtn">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.1 19.1 19"/></svg>
           <span data-i18n="Retry Scan">${t("Retry Scan")}</span>
         </button>
       `;
       vp.appendChild(emptyEl);
+      // The host is user-configured, so it is written as text rather than
+      // interpolated into the markup above.
+      const hostEl = emptyEl.querySelector(".studio-empty-host");
+      if (hostEl) hostEl.textContent = getStudioHost();
       const retryBtn = emptyEl.querySelector("#studioEmptyScanBtn");
       if (retryBtn) {
         retryBtn.addEventListener("click", () => scanStudioServices(true));
@@ -5031,10 +5501,10 @@ function switchStudioServiceByPort(port) {
       hubCard.innerHTML = `
         <div class="studio-empty-icon">🌐</div>
         <h3>Robonix Hub</h3>
-        <p class="studio-empty-desc">${t("Robonix Hub runs with strict origin isolation. Click below to launch in a dedicated tab.")}</p>
+        <p class="studio-empty-desc" data-i18n="Robonix Hub runs with strict origin isolation. Click below to launch in a dedicated tab.">${t("Robonix Hub runs with strict origin isolation. Click below to launch in a dedicated tab.")}</p>
         <button type="button" class="studio-empty-scan-btn" id="studioOpenHubDirect">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-          <span>${t("Open in External Tab")}</span>
+          <span data-i18n="Open in External Tab">${t("Open in External Tab")}</span>
         </button>
       `;
       vp.appendChild(hubCard);
@@ -5186,6 +5656,14 @@ function handleI18nChange() {
   renderPlan();
   renderActivePlans(state.activePlansError);
   renderHistory();
+  // The argument payload embeds a translated status, so an open node popup has
+  // to be rebuilt for the new language (renderPlan skips it on purpose).
+  if (detailSelections.live) {
+    renderExecutionDetail(detailSelections.live.node, detailSelections.live.status, detailSelections.live.nodeState);
+  }
+  if (detailSelections.history) {
+    renderHistoryExecutionDetail(detailSelections.history.node, detailSelections.history.status, detailSelections.history.nodeState);
+  }
   renderHandsfree();
   syncVoiceControls();
   setText("voiceState", state.voiceRecording ? t("recording") : t("ready"));

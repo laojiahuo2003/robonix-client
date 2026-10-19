@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Robonix Client</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20261018s" />
+    <link rel="stylesheet" href="/static/styles.css?v=20261019i" />
   </head>
   <body>
     <div class="app-shell">
@@ -106,77 +106,65 @@
             </form>
             </section>
 
-            <section class="dashboard-sidebar unified-cockpit-sidebar" id="dashboardSidebar">
-              <!-- 1. Task Overview: Status and Current Goal -->
-              <section class="panel cockpit-header-card">
-                <div class="cockpit-top-bar">
-                  <div class="cockpit-status-badge" id="cockpitStatusBadge">
-                    <span class="status-pulse-dot"></span>
-                    <span id="cockpitStatusText">IDLE</span>
+            <section class="dashboard-sidebar" id="dashboardSidebar">
+              <section class="panel current-goal-panel">
+                <div class="panel-header compact">
+                  <div>
+                    <h2 data-i18n="Current Goal">Current Goal</h2>
+                    <span data-i18n="Current task and selected goal context.">Current task and selected goal context.</span>
                   </div>
-                  <div class="cockpit-meta-group">
-                    <span class="cockpit-task-counter" id="cockpitTaskCounter" data-current-task-label data-i18n="Current Task: idle">Current Task: idle</span>
+                  <span class="sidebar-status-chip" data-task-status-chip>
+                    <i class="status-dot"></i>
+                    <span data-current-task-label data-i18n="Current Task: idle">Current Task: idle</span>
+                  </span>
+                </div>
+                <div class="goal-line" id="goalLine" data-i18n="Goal: waiting for a task.">Goal: waiting for a task.</div>
+                <div class="goal-preview" data-goal-preview></div>
+              </section>
+
+              <nav class="sidebar-menu" id="sidebarMenu">
+                <button class="sidebar-menu-item active" type="button" aria-pressed="true" data-sidebar-view="rtdl" data-i18n="RTDL Forest">RTDL Forest</button>
+                <button class="sidebar-menu-item" type="button" aria-pressed="false" data-sidebar-view="events" data-i18n="Event Log">Event Log</button>
+                <span class="sidebar-icon-group">
+                  <button class="sidebar-icon-btn" id="openActiveRtdl" type="button" title="View Fullscreen Execution Map" data-i18n-title="View Fullscreen Execution Map">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+                    <span id="activeRtdlCount">0</span>
+                  </button>
+                  <button class="sidebar-icon-btn" id="openRtdlHistory" type="button" title="Execution History" data-i18n-title="Execution History">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>
+                    <span id="rtdlHistoryCount">0</span>
+                  </button>
+                </span>
+              </nav>
+
+              <section class="panel rtdl-panel execution-panel" data-sidebar-panel="rtdl">
+                <div class="panel-header">
+                  <div>
+                    <h2 data-i18n="RTDL Forest">RTDL Forest</h2>
+                    <span data-plan-summary data-i18n="waiting for real plan">waiting for real plan</span>
                   </div>
                 </div>
-
-                <div class="cockpit-goal-title-wrap">
-                  <h3 class="cockpit-goal-title" id="goalLine" data-i18n="Goal: waiting for a task.">Goal: waiting for a task.</h3>
+                <div class="execution-table">
+                  <div class="table-head">
+                    <span data-i18n="Node">Node</span>
+                    <span data-i18n="Type">Type</span>
+                    <span data-i18n="Status">Status</span>
+                    <span data-i18n="Provider / ID">Provider / ID</span>
+                    <span data-i18n="Duration">Duration</span>
+                    <span data-i18n="Started">Started</span>
+                  </div>
+                  <div class="plan-tree" data-plan-tree="full"></div>
                 </div>
               </section>
 
-              <!-- 2. Integrated Visualizer: Execution Tree & Event Log Tabs -->
-              <section class="panel cockpit-tabs-panel">
-                <div class="cockpit-tabs-header">
-                  <div class="cockpit-tab-nav" role="tablist">
-                    <button type="button" class="cockpit-tab-btn active" data-cockpit-tab="tree" id="tabBtnTree">
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="5" r="3"/><circle cx="5" cy="19" r="3"/><circle cx="19" cy="19" r="3"/><line x1="8.5" y1="7.5" x2="6.5" y2="16.5"/><line x1="15.5" y1="7.5" x2="17.5" y2="16.5"/></svg>
-                      <span data-i18n="Execution Tree">Execution Tree</span>
-                    </button>
-                    <button type="button" class="cockpit-tab-btn" data-cockpit-tab="events" id="tabBtnEvents">
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-                      <span data-i18n="Event Log">Event Log</span>
-                      <span class="cockpit-badge" data-event-summary>0</span>
-                    </button>
-                  </div>
-
-                  <div class="cockpit-actions-quick">
-                    <button class="cockpit-mini-btn" id="openActiveRtdl" type="button" title="View Fullscreen Execution Map" data-i18n-title="View Fullscreen Execution Map">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
-                      <span id="activeRtdlCount">0</span>
-                    </button>
-                    <button class="cockpit-mini-btn" id="openRtdlHistory" type="button" title="Execution History" data-i18n-title="Execution History">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>
-                      <span id="rtdlHistoryCount">0</span>
-                    </button>
+              <section class="panel trace-panel thought-panel" data-sidebar-panel="events" hidden>
+                <div class="panel-header">
+                  <div>
+                    <h2 data-i18n="Event Log">Event Log</h2>
+                    <span><span data-event-summary>0</span> <span data-i18n="event(s)">event(s)</span></span>
                   </div>
                 </div>
-
-                <!-- Tab Pane 1: Execution Tree & Node Detail -->
-                <div class="cockpit-tab-pane active" id="paneTree">
-                  <div class="cockpit-pane-meta">
-                    <span data-plan-summary data-i18n="waiting for real plan">waiting for real plan</span>
-                    <span id="activeRtdlSummary" style="display:none;"></span>
-                  </div>
-                  <div class="cockpit-tree-scroll">
-                    <div class="plan-tree" data-plan-tree="full"></div>
-                  </div>
-                  <div class="execution-detail" id="executionDetail">
-                    <div class="detail-title" id="executionDetailTitle" data-i18n="Node detail">Node detail</div>
-                    <div class="detail-grid">
-                      <div><span data-i18n="Provider / ID">Provider / ID</span><strong id="activeProvider">-</strong></div>
-                      <div><span data-i18n="Started">Started</span><strong id="activeStarted">-</strong></div>
-                      <div><span data-i18n="Duration">Duration</span><strong id="activeDuration">-</strong></div>
-                    </div>
-                    <pre class="args" id="activeArgs">{}</pre>
-                  </div>
-                </div>
-
-                <!-- Tab Pane 2: Event Log -->
-                <div class="cockpit-tab-pane" id="paneEvents">
-                  <div class="cockpit-events-scroll">
-                    <div class="event-list" data-event-list></div>
-                  </div>
-                </div>
+                <div class="event-list" data-event-list></div>
               </section>
             </section>
           </section>
@@ -878,8 +866,28 @@
       </section>
     </div>
 
-    <script src="/static/i18n.js?v=20261018s"></script>
-    <script src="/static/app.js?v=20261018s"></script>
+    <div class="modal-backdrop" id="nodeDetailModal" role="dialog" aria-modal="true" aria-labelledby="executionDetailTitle" hidden>
+      <section class="node-detail-modal">
+        <header class="rtdl-history-modal-header">
+          <div>
+            <h2 id="executionDetailTitle" data-i18n="Node detail">Node detail</h2>
+            <span data-i18n="Provider, timing and arguments of the selected node.">Provider, timing and arguments of the selected node.</span>
+          </div>
+          <button class="icon-button modal-close" id="closeNodeDetail" type="button" aria-label="Close node detail" data-i18n-aria-label="Close node detail">×</button>
+        </header>
+        <div class="node-detail-modal-body">
+          <div class="detail-grid">
+            <div><span data-i18n="Provider / ID">Provider / ID</span><strong id="activeProvider">-</strong></div>
+            <div><span data-i18n="Started">Started</span><strong id="activeStarted">-</strong></div>
+            <div><span data-i18n="Duration">Duration</span><strong id="activeDuration">-</strong></div>
+          </div>
+          <pre class="args" id="activeArgs">{}</pre>
+        </div>
+      </section>
+    </div>
+
+    <script src="/static/i18n.js?v=20261019i"></script>
+    <script src="/static/app.js?v=20261019i"></script>
     <script src="/static/vitals.bundle.js?v=20261018f"></script>
   </body>
 </html>

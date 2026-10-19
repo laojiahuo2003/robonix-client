@@ -23,6 +23,7 @@
     "Current": "电流",
     "Live vitals": "实时遥测",
     "Connecting": "连接中",
+    "No model": "无模型",
     "Compute node telemetry from Vitals": "来自 Vitals 的计算节点遥测",
     "Audio": "音频",
     "Settings": "设置",
@@ -35,6 +36,10 @@
     "Robonix Hub": "全景门户",
     "Fleet Hub": "车队门户",
     "Audio Server": "声卡诊断",
+    "Scene Perception Suite (Port 50107)": "场景感知套件（端口 50107）",
+    "RTAB-Map SLAM Mapping (Port 8091)": "RTAB-Map SLAM 建图（端口 8091）",
+    "Robonix Fleet Hub Portal (Port 4880)": "Robonix 车队 Hub 门户（端口 4880）",
+    "Audio Device Server (Port 60001)": "音频设备服务（端口 60001）",
     "Audio Reverse Bridge": "音频反向桥",
     "Perception Logs": "感知日志",
     "Reload": "刷新",
@@ -104,6 +109,13 @@
     "recording": "录制中",
     "ready": "就绪",
     "Show RTDL": "查看 RTDL",
+    "Activity": "活动",
+    "{count} activity events": "{count} 条活动",
+    "Expand activity": "展开活动",
+    "Collapse activity": "收起活动",
+    "Calling {names}": "调用 {names}",
+    "RTDL plan round {round}": "RTDL 计划第 {round} 轮",
+    "and {count} more": "等 {count} 个",
     "attachment": "附件",
     "Remove attachment": "移除附件",
     "added to running task": "已加入运行中的任务",
@@ -170,6 +182,8 @@
     "RTDL Forest": "RTDL 树",
     "waiting for real plan": "等待真实计划",
     "Active RTDL": "活动 RTDL",
+    "View Fullscreen Execution Map": "全屏执行拓扑",
+    "Execution History": "执行历史",
     "Open live Executor plans": "打开实时 Executor 计划",
     "unavailable": "不可用",
     "Node": "节点",
@@ -186,6 +200,8 @@
     "No RTDL plan in this session yet.": "此会话暂无 RTDL 计划。",
     "No RTDL tree in this session yet.": "此会话暂无 RTDL 执行树。",
     "Latest plan {plan} (completed) · round {round} · {calls} call(s)": "最近计划 {plan} (已完成) · 第 {round} 轮 · {calls} 次调用",
+    "Close node detail": "关闭节点详情",
+    "Provider, timing and arguments of the selected node.": "所选节点的 Provider、时间与参数。",
     "Plan {id} · round {round}": "计划 {id} · 第 {round} 轮",
     "No completed RTDL trees yet.": "暂无已完成的 RTDL 树。",
     "Tree {n}: {label}": "树 {n}：{label}",
@@ -222,8 +238,6 @@
     "Event Log": "事件日志",
     "Execution Tree": "执行树",
     "No active action sequence": "暂无活动动作序列",
-    "View Fullscreen Execution Map": "全屏执行拓扑",
-    "Execution History": "执行历史",
     "Step": "步骤",
     "Live plans reported by Executor": "Executor 报告的实时计划",
     "Close active RTDL": "关闭活动 RTDL",
@@ -592,6 +606,13 @@
     "No scene data yet": "暂无场景数据",
   };
 
+  // Legacy status rows stored the translated text instead of the key. Build a
+  // reverse table so those rows can still follow a language switch.
+  const zhReverse = new Map();
+  Object.entries(zhCN).forEach(([key, value]) => {
+    if (typeof value === "string" && !zhReverse.has(value)) zhReverse.set(value, key);
+  });
+
   function detectLang() {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
@@ -618,6 +639,15 @@
     const has = Object.prototype.hasOwnProperty.call(zhCN, source);
     const translated = current === "zh" && has ? zhCN[source] : source;
     return interpolate(translated, params);
+  }
+
+  /// Translate a transcript row persisted before i18nKey was stored. Chinese
+  /// mode treats the text as a possible English key; English mode reverses a
+  /// known Chinese value back to its key. Unknown free text is left untouched.
+  function translateStored(text) {
+    const source = String(text ?? "");
+    if (!source) return source;
+    return current === "zh" ? t(source) : (zhReverse.get(source) || source);
   }
 
   function applyDocument() {
@@ -668,6 +698,7 @@
 
   window.RobonixI18N = {
     t,
+    translateStored,
     setLang,
     toggle: () => setLang(current === "zh" ? "en" : "zh"),
     lang: () => current,
