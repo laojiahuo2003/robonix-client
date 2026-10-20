@@ -770,32 +770,6 @@ h2 {
   min-height: 0;
 }
 
-.rtdl-snapshot {
-  min-height: 0;
-  border-top: 1px solid var(--line-soft);
-  background: rgba(9, 16, 20, 0.5);
-}
-
-.snapshot-header {
-  min-height: 30px;
-  padding: 7px 10px;
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  color: var(--muted);
-  border-bottom: 1px solid var(--line-soft);
-}
-
-.snapshot-header strong {
-  color: var(--text);
-}
-
-.snapshot-tree {
-  max-height: min(45vh, 360px);
-  overflow-y: auto;
-  overflow-x: hidden;
-}
-
 .messages {
   min-width: 0;
   min-height: 0;
@@ -1590,59 +1564,6 @@ select:focus {
   letter-spacing: 0.01em;
 }
 
-.rtdl-history-launch {
-  width: 100%;
-  min-height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 12px;
-  border-top: 1px solid var(--line-soft);
-  border-right: 0;
-  border-bottom: 0;
-  border-left: 0;
-  border-radius: 0;
-  color: var(--text);
-  background: rgba(12, 23, 28, 0.78);
-  cursor: pointer;
-  text-align: left;
-}
-
-.active-rtdl-launch {
-  border-bottom: 1px solid var(--line-soft);
-  background: linear-gradient(90deg, rgba(20, 62, 81, 0.48), rgba(12, 23, 28, 0.78));
-}
-
-.rtdl-history-launch:hover,
-.rtdl-history-launch:focus-visible {
-  background: rgba(32, 69, 88, 0.42);
-  outline: none;
-}
-
-.rtdl-history-launch > span:first-child {
-  display: grid;
-  gap: 2px;
-}
-
-.rtdl-history-launch small {
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.rtdl-history-count {
-  display: inline-flex;
-  min-width: 26px;
-  min-height: 24px;
-  align-items: center;
-  justify-content: center;
-  padding: 0 7px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  color: var(--cyan);
-  background: rgba(8, 16, 20, 0.8);
-}
-
 .history-plan-tree {
   min-width: 0;
   min-height: 0;
@@ -1897,15 +1818,6 @@ select:focus {
   50% { stroke-width: 2.2; filter: drop-shadow(0 0 14px rgba(241, 186, 79, 0.48)); }
 }
 
-.snapshot-tree .plan-row {
-  padding: 5px 10px;
-  font-size: 12px;
-}
-
-.snapshot-tree .plan-row span:nth-child(n + 5) {
-  display: none;
-}
-
 .snapshot-more {
   width: 100%;
   min-height: 30px;
@@ -2044,14 +1956,6 @@ select:focus {
 .status.failed,
 .bad {
   color: var(--red);
-}
-
-.execution-detail {
-  border-top: 1px solid var(--line-soft);
-  padding: 8px 12px 10px;
-  background: rgba(9, 16, 20, 0.58);
-  max-height: 190px;
-  overflow: auto;
 }
 
 .detail-title {
@@ -2543,80 +2447,6 @@ select:focus {
 .target-panel {
   min-height: 0;
   overflow: hidden;
-}
-
-.map-stage,
-.camera-feed {
-  position: relative;
-  height: calc(100% - 35px);
-  min-height: 146px;
-  overflow: hidden;
-}
-
-.map-stage {
-  background: #10191b;
-}
-
-.map-grid {
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
-  background-size: 16px 16px;
-}
-
-.map-stage svg {
-  position: absolute;
-  inset: 8px;
-  width: calc(100% - 16px);
-  height: calc(100% - 16px);
-}
-
-.map-stage path {
-  fill: none;
-  stroke: rgba(111, 209, 125, 0.7);
-  stroke-width: 3;
-}
-
-.map-stage circle {
-  fill: rgba(240, 103, 88, 0.18);
-  stroke: var(--red);
-  stroke-width: 3;
-}
-
-.map-stage polygon {
-  fill: rgba(72, 166, 223, 0.2);
-  stroke: var(--blue);
-  stroke-width: 3;
-}
-
-.camera-feed {
-  display: grid;
-  place-items: center;
-  background:
-    linear-gradient(120deg, rgba(180, 142, 80, 0.17), transparent 28%),
-    linear-gradient(145deg, #243139, #15262b 52%, #0d171b);
-}
-
-.camera-feed::before {
-  content: "";
-  width: 78%;
-  height: 60%;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background:
-    linear-gradient(90deg, transparent 0 48%, rgba(255, 255, 255, 0.1) 48% 51%, transparent 51%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.14), transparent 38%),
-    linear-gradient(135deg, rgba(88, 135, 92, 0.35), rgba(142, 106, 58, 0.25));
-  border-radius: 8px;
-}
-
-.camera-feed img {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
 }
 
 .live-dot {
@@ -5847,11 +5677,11 @@ select:focus {
   color: rgba(220, 230, 242, 0.7);
 }
 
-.studio-viewport:fullscreen {
+.studio-shell:fullscreen {
   background: #0b0e14;
 }
 
-.studio-viewport:fullscreen .studio-frame {
+.studio-shell:fullscreen .studio-frame {
   width: 100vw;
   height: 100vh;
 }

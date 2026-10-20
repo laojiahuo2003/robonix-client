@@ -9,6 +9,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+import urllib.error
+import urllib.request
+
 import grpc
 import yaml
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
@@ -349,8 +352,6 @@ CANDIDATE_STUDIO_PORTS = [
 
 
 def _probe_http_port_sync(host: str, port: int, timeout: float = 0.35) -> dict[str, Any] | None:
-    import urllib.request
-    import urllib.error
     url = f"http://{host}:{port}/"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "RobonixStudio/1.0"})
@@ -368,22 +369,21 @@ def _probe_http_port_sync(host: str, port: int, timeout: float = 0.35) -> dict[s
 def _infer_service_metadata(port: int, raw_title: str) -> dict[str, str]:
     tl = raw_title.lower()
     if port == 50107 or "scene" in tl:
-        return {"name": "Scene Service", "icon": "👁️", "desc": "Scene Perception Service"}
+        return {"name": "Scene Service", "icon": "👁️"}
     if port == 8091 or "mapping" in tl or "slam" in tl:
-        return {"name": "SLAM Mapping", "icon": "🗺️", "desc": "RTAB-Map SLAM Console"}
+        return {"name": "SLAM Mapping", "icon": "🗺️"}
     if port == 4880 or "hub" in tl:
-        return {"name": "Robonix Hub", "icon": "🌐", "desc": "Robot Fleet Center"}
+        return {"name": "Robonix Hub", "icon": "🌐"}
     if port == 60001 or "audio" in tl:
-        return {"name": "Audio Server", "icon": "🔊", "desc": "Audio Device Service"}
+        return {"name": "Audio Server", "icon": "🔊"}
     if port == 8085 or "arm" in tl or "hand" in tl:
-        return {"name": "Manipulator Control", "icon": "🦾", "desc": "Arm & Hand WebUI"}
+        return {"name": "Manipulator Control", "icon": "🦾"}
     if port == 8765 or "foxglove" in tl:
-        return {"name": "Foxglove Bridge", "icon": "🦊", "desc": "Foxglove Studio Bridge"}
+        return {"name": "Foxglove Bridge", "icon": "🦊"}
     clean_title = raw_title.replace("Robonix · ", "").replace("robonix ", "").strip()
     return {
         "name": clean_title or f"Service {port}",
         "icon": "⚙️",
-        "desc": f"Web Service on port {port}",
     }
 
 
@@ -397,15 +397,20 @@ async def discover_studio_services(
     if not isinstance(extra_ports, str):
         extra_ports = ""
     host = robot_host.strip() or "127.0.0.1"
-    ports_set = list(CANDIDATE_STUDIO_PORTS)
+    # Named ports_set before, but it was a list and the set semantics never
+    # existed: CANDIDATE_STUDIO_PORTS order is what the tabs come out in.
+    ports = list(CANDIDATE_STUDIO_PORTS)
     if extra_ports:
         for ep in extra_ports.split(","):
             with suppress(ValueError):
                 p = int(ep.strip())
-                if p not in ports_set:
-                    ports_set.append(p)
+                # urllib does not reject a port above 65535: 99999 wraps to
+                # 34463 and happily answers, so the scan would report a service
+                # on an unrelated port with a URL nobody can open.
+                if 1 <= p <= 65535 and p not in ports:
+                    ports.append(p)
 
-    tasks = [asyncio.to_thread(_probe_http_port_sync, host, port) for port in ports_set]
+    tasks = [asyncio.to_thread(_probe_http_port_sync, host, port) for port in ports]
     results = await asyncio.gather(*tasks)
 
     discovered = []
@@ -418,7 +423,6 @@ async def discover_studio_services(
             "port": r["port"],
             "name": meta["name"],
             "icon": meta["icon"],
-            "desc": meta["desc"],
             "title": r["title"],
             "url": f"http://{host}:{r['port']}/",
             "online": True,
