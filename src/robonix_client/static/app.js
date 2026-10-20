@@ -5319,13 +5319,8 @@ function redrawPerceptionCanvases() {
 // Robonix Studio — Micro-Frontend Service Integrator (Dynamic Ontology Discovery)
 // ═══════════════════════════════════════════════════════════════════════════
 
-let studioDiscoveredServices = [
-  { port: 50107, name: "Scene Service", icon: "👁️", path: "/", title: "Scene Service" },
-  { port: 8091, name: "SLAM Mapping", icon: "🗺️", path: "/", title: "Mapping Service" },
-  { port: 4880, name: "Robonix Hub", icon: "🌐", path: "/", title: "Fleet Hub" },
-  { port: 60001, name: "Audio Server", icon: "🔊", path: "/", title: "Audio Reverse Bridge" },
-];
-let activeStudioPort = 50107;
+let studioDiscoveredServices = [];
+let activeStudioPort = null;
 let studioScanning = false;
 let studioHasScanned = false;
 let studioLastScanTs = 0;

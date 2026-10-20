@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import time
 from contextlib import suppress
 from pathlib import Path
@@ -331,9 +332,7 @@ async def perception_map(atlas: str = Query(DEFAULT_ATLAS)) -> dict[str, Any]:
 
 
 
-# ═══════════════════════════════════════════════════════════════════════════
 # Dynamic Robot Ontology Studio Discovery
-# ═══════════════════════════════════════════════════════════════════════════
 
 CANDIDATE_STUDIO_PORTS = [
     50107,  # Scene Perception Suite
@@ -352,7 +351,6 @@ CANDIDATE_STUDIO_PORTS = [
 def _probe_http_port_sync(host: str, port: int, timeout: float = 0.35) -> dict[str, Any] | None:
     import urllib.request
     import urllib.error
-    import re
     url = f"http://{host}:{port}/"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "RobonixStudio/1.0"})
