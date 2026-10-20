@@ -6013,7 +6013,29 @@ select:focus {
   grid-template-rows: auto minmax(0, 1fr);
 }
 
-.dashboard-sidebar > .panel[data-sidebar-panel="rtdl"]:not([hidden]) .execution-table,
+/* Filling the panel means every box between the panel and the SVG viewport
+   needs a definite height. The first content-sized box in that chain would
+   collapse the tree back to its drawing size, which is what used to leave the
+   viewport a small strip at the top of the panel. */
+.dashboard-sidebar > .panel[data-sidebar-panel="rtdl"]:not([hidden]) .execution-table {
+  display: flex;
+  flex-direction: column;
+  max-height: none;
+}
+
+.dashboard-sidebar > .panel[data-sidebar-panel="rtdl"]:not([hidden]) .plan-tree {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.dashboard-sidebar > .panel[data-sidebar-panel="rtdl"]:not([hidden]) .plan-record {
+  flex: 1 1 auto;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+}
+
 .dashboard-sidebar > .panel[data-sidebar-panel="rtdl"]:not([hidden]) .bt-tree-viewport {
   max-height: none;
 }
