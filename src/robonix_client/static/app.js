@@ -1974,6 +1974,7 @@ function renderTimeline() {
 function renderPlan() {
   const roots = document.querySelectorAll("[data-plan-tree]");
   roots.forEach((root) => clear(root));
+  treeLiveKeys = new Set();
   const records = normalizedPlanRecords();
   const activeRecords = records.filter((record) => recordIsActive(record));
   const latestActiveRecord = activeRecords[0] || null;
@@ -2015,6 +2016,7 @@ function renderPlan() {
     roots.forEach((root) => renderPlanRecord(root, displayRecord, showNodeDetail));
   }
   renderPlanHistory(historyRecords);
+  pruneTreeObservers();
   const newest = displayRecord;
   // While the node-detail popup is open, keep showing the node the user clicked
   // instead of letting the executor poll overwrite it every couple of seconds.
@@ -2064,11 +2066,31 @@ function renderPlanHistory(records) {
 const treeViewStates = new Map();
 const treeResizeObservers = new Map();
 
+// planRecords is capped at 80, so a plan that scrolls off the cap leaves its
+// observer watching a detached viewport forever. Every render rebuilds the
+// trees, so anything not re-registered in this pass is dead weight.
+let treeLiveKeys = new Set();
+
+function pruneTreeObservers() {
+  treeResizeObservers.forEach((entry, key) => {
+    if (!entry.viewport.isConnected) {
+      entry.observer.disconnect();
+      treeResizeObservers.delete(key);
+    }
+  });
+  // The view state is only a few numbers, but the map is unbounded: a long
+  // session used to keep one entry per plan it ever drew.
+  treeViewStates.forEach((_, key) => {
+    if (!treeLiveKeys.has(key)) treeViewStates.delete(key);
+  });
+}
+
 // Map-style interaction for the RTDL tree: drag to pan, wheel to zoom (around
 // the cursor), double click to reset. The view is stored by planId so the
 // periodic re-render of the tree keeps the user's zoom and position.
 function enableTreePanZoom(planId, viewport, svg) {
   if (!svg) return;
+  treeLiveKeys.add(planId);
 
   // Read dimensions from viewBox instead of width/height attributes
   const viewBox = svg.getAttribute("viewBox");
@@ -2080,8 +2102,11 @@ function enableTreePanZoom(planId, viewport, svg) {
   let lastY = 0;
 
   // A re-render replaces the viewport, so the previous observer is stale.
-  treeResizeObservers.get(planId)?.disconnect();
-  treeResizeObservers.delete(planId);
+  const stale = treeResizeObservers.get(planId);
+  if (stale) {
+    stale.observer.disconnect();
+    treeResizeObservers.delete(planId);
+  }
 
   // The transform starts at the padding box, so the tree may only use the area
   // inside the padding. Measuring clientWidth instead offsets the tree by the
@@ -2159,7 +2184,9 @@ function enableTreePanZoom(planId, viewport, svg) {
       if (view.touched) apply();
       else fitView();
     });
-    treeResizeObservers.set(planId, observer);
+    // The viewport is kept alongside the observer so a later pass can tell a
+    // live tree from one whose element has been replaced.
+    treeResizeObservers.set(planId, { observer, viewport });
     observer.observe(viewport);
   }
 
@@ -2271,7 +2298,10 @@ function renderBehaviorTree(root, plan, resultMaps, runningIndex, onSelect = ren
     viewport.className = "bt-tree-viewport";
     const svg = makeBehaviorTreeSvg(treeRoot, plan, resultMaps, runningIndex, onSelect);
     viewport.appendChild(svg);
-    const viewKey = planId ? `${planId}-${treeIndex}` : `tree-${treeIndex}`;
+    // Both branches need a prefix the other cannot produce: a plan literally
+    // id'd "tree" used to collide with the planless key at the same index and
+    // the two trees then shared one pan/zoom state.
+    const viewKey = planId ? `plan:${planId}:${treeIndex}` : `tree:${treeIndex}`;
     enableTreePanZoom(viewKey, viewport, svg);
     card.append(header, viewport);
     root.appendChild(card);
@@ -5324,6 +5354,10 @@ let activeStudioPort = null;
 let studioScanning = false;
 let studioHasScanned = false;
 let studioLastScanTs = 0;
+// Generation counter plus the live controller: a forced scan supersedes the one
+// still in flight, so its late finally must not clear the newer scan's state.
+let studioScanGeneration = 0;
+let studioScanController = null;
 
 function getStudioHost() {
   return (state && state.settings && state.settings.robotHost) || window.location.hostname || "127.0.0.1";
@@ -5339,13 +5373,28 @@ function getStudioServiceUrl(port, isExternal = false) {
   return `http://${host}:${port}/`;
 }
 
+// The four shipped service tabs are static markup, not built by this function.
+// Remember them once so an empty discovery result can put them back: rebuilding
+// the strip on a language switch used to clear them and return early, leaving
+// the Studio header with no service tabs at all.
+let studioStaticTabsMarkup = null;
+
 function renderStudioTabs() {
   const nav = document.getElementById("studioServicesNav");
   if (!nav) return;
+  if (studioStaticTabsMarkup === null) studioStaticTabsMarkup = nav.innerHTML;
+
+  if (!studioDiscoveredServices.length) {
+    nav.innerHTML = studioStaticTabsMarkup;
+    // Nothing is framed when no service is selected, so no tab is active.
+    nav.querySelectorAll(".studio-service-tab.active").forEach((tab) => tab.classList.remove("active"));
+    // The restored nodes are fresh, so the current language has to be applied
+    // again; applyDocument() already ran before this render.
+    window.RobonixI18N?.applyDocument?.();
+    return;
+  }
+
   nav.innerHTML = "";
-
-  if (!studioDiscoveredServices.length) return;
-
   studioDiscoveredServices.forEach((s) => {
     const btn = document.createElement("button");
     btn.type = "button";
@@ -5369,6 +5418,11 @@ function renderStudioTabs() {
     portSpan.className = "tab-port";
     portSpan.textContent = String(s.port);
 
+    // The static tabs carry role/aria-selected, so the discovered ones have to
+    // match or a screen reader announces a tab list full of plain buttons.
+    btn.setAttribute("role", "tab");
+    btn.setAttribute("aria-selected", s.port === activeStudioPort ? "true" : "false");
+    btn.setAttribute("aria-controls", "studioViewport");
     btn.append(iconSpan, titleSpan, portSpan);
     nav.appendChild(btn);
   });
@@ -5379,8 +5433,14 @@ function renderStudioEmptyState(show) {
   const frame = document.getElementById("studioFrame");
   if (!vp) return;
 
-  let emptyEl = vp.querySelector(".studio-empty-state");
+  // The Hub fallback card shares the studio-empty-state class (it has no rules
+  // of its own), so it has to be excluded here. Otherwise a stale hub card
+  // counts as "an empty state already exists" and the real one is never built,
+  // leaving a blank viewport with no way to retry.
+  let emptyEl = vp.querySelector(".studio-empty-state:not(.studio-hub-launch-card)");
   if (show) {
+    const hubCard = vp.querySelector(".studio-hub-launch-card");
+    if (hubCard) hubCard.style.display = "none";
     if (frame) frame.style.display = "none";
     if (!emptyEl) {
       emptyEl = document.createElement("div");
@@ -5406,7 +5466,11 @@ function renderStudioEmptyState(show) {
     }
   } else {
     if (emptyEl) emptyEl.remove();
-    if (frame) frame.style.display = "";
+    // The Hub cannot be framed, so the viewport it owns is the card, not the
+    // iframe. Restore it when it is still the selected service.
+    const hubCard = vp.querySelector(".studio-hub-launch-card");
+    if (hubCard) hubCard.style.display = activeStudioPort === 4880 ? "" : "none";
+    if (frame) frame.style.display = activeStudioPort === 4880 ? "none" : "";
   }
 }
 
@@ -5415,6 +5479,16 @@ async function scanStudioServices(force = false) {
   if (!force && studioHasScanned && Date.now() - studioLastScanTs < 12000) {
     return;
   }
+  // force bypasses the guard above, so N rapid clicks used to leave N probes
+  // running against 10 ports each. Abort the previous one instead of stacking.
+  if (studioScanController) studioScanController.abort();
+  const controller = new AbortController();
+  studioScanController = controller;
+  const scanToken = ++studioScanGeneration;
+  // The backend probes each candidate port, so a hung robot host would
+  // otherwise leave the badge spinning with no request to fail.
+  const scanTimeout = setTimeout(() => controller.abort(), 8000);
+
   studioScanning = true;
   studioHasScanned = true;
   studioLastScanTs = Date.now();
@@ -5429,7 +5503,9 @@ async function scanStudioServices(force = false) {
 
   try {
     const host = getStudioHost();
-    const res = await fetch(`/api/studio/services?robot_host=${encodeURIComponent(host)}`);
+    const res = await fetch(`/api/studio/services?robot_host=${encodeURIComponent(host)}`, {
+      signal: controller.signal,
+    });
     if (res.ok) {
       const data = await res.json();
       studioDiscoveredServices = Array.isArray(data.services) ? data.services : [];
@@ -5437,14 +5513,29 @@ async function scanStudioServices(force = false) {
       console.warn("Studio service scan returned status:", res.status);
     }
   } catch (err) {
-    console.warn("Studio service scan failed:", err);
+    // A superseded scan is expected, not a failure worth reporting.
+    if (err && err.name !== "AbortError") {
+      console.warn("Studio service scan failed:", err);
+    }
   } finally {
-    studioScanning = false;
-    if (rescanBtn) rescanBtn.classList.remove("scanning");
-    if (badge) badge.classList.remove("scanning");
+    clearTimeout(scanTimeout);
+    // A newer scan owns the shared state now; touching it here would clear its
+    // spinner and let another scan start while it is still running.
+    if (scanToken === studioScanGeneration) {
+      studioScanning = false;
+      studioScanController = null;
+      if (rescanBtn) rescanBtn.classList.remove("scanning");
+      if (badge) badge.classList.remove("scanning");
+    }
   }
 
+  // Its results were superseded, so the newer scan renders them instead.
+  if (scanToken !== studioScanGeneration) return;
+
   if (!studioDiscoveredServices.length) {
+    // A stale port would keep the old service's name in the badge and make the
+    // next language switch skip updating it.
+    activeStudioPort = null;
     renderStudioTabs();
     renderStudioEmptyState(true);
     if (badgeText) badgeText.textContent = `0 ${t("Services Online")}`;
@@ -5517,7 +5608,14 @@ function switchStudioServiceByPort(port) {
 
   if (frame) {
     const targetUrl = getStudioServiceUrl(numPort, false);
-    if (frame.src !== targetUrl) {
+    // Not frame.src: the browser normalizes what it stores (host to lowercase,
+    // default port dropped), so a robotHost typed as "Tiago.local" makes
+    // frame.src read back "tiago.local" and never equal targetUrl. The frame
+    // then reloaded on every return to that service, flashing the scrim and
+    // throwing away whatever state the service held.
+    const loadedUrl = frame.dataset.studioFrameUrl || "";
+    if (loadedUrl !== targetUrl) {
+      frame.dataset.studioFrameUrl = targetUrl;
       if (scrim) scrim.hidden = false;
       frame.src = targetUrl;
     }
@@ -5571,7 +5669,10 @@ function bindStudioControls() {
       const scrim = document.getElementById("studioLoadingScrim");
       if (frame && activeStudioPort) {
         if (scrim) scrim.hidden = false;
-        frame.src = getStudioServiceUrl(activeStudioPort, false);
+        // Keep the marker in step with what the frame is now showing, or the
+        // next switch back to this service would compare against an older URL.
+        frame.dataset.studioFrameUrl = getStudioServiceUrl(activeStudioPort, false);
+        frame.src = frame.dataset.studioFrameUrl;
         setTimeout(() => { if (scrim) scrim.hidden = true; }, 1200);
       }
     });
@@ -5593,10 +5694,13 @@ function bindStudioControls() {
   if (fsBtn && !fsBtn.dataset.bound) {
     fsBtn.dataset.bound = "1";
     fsBtn.addEventListener("click", () => {
-      const vp = document.getElementById("studioViewport");
-      if (!vp) return;
+      // The shell, not the viewport: the header holds the button that was just
+      // clicked plus the service tabs, and going fullscreen on the viewport
+      // alone hid them with no way back except Esc.
+      const shell = document.querySelector(".studio-shell");
+      if (!shell) return;
       if (!document.fullscreenElement) {
-        vp.requestFullscreen().catch(() => {});
+        shell.requestFullscreen().catch(() => {});
       } else {
         document.exitFullscreen().catch(() => {});
       }

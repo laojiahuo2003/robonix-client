@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Robonix Client</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20261019l" />
+    <link rel="stylesheet" href="/static/styles.css?v=20261019m" />
   </head>
   <body>
     <div class="app-shell">
@@ -715,23 +715,23 @@
                 </div>
               </div>
 
-              <div class="studio-services-nav" id="studioServicesNav" role="tablist" aria-label="Studio Services">
-                <button type="button" class="studio-service-tab active" title="Scene Perception Service (Port 50107)" data-i18n-title="Scene Perception Service (Port 50107)">
+              <div class="studio-services-nav" id="studioServicesNav" role="tablist" aria-label="Studio Services" data-i18n-aria-label="Studio Services">
+                <button type="button" class="studio-service-tab active" role="tab" aria-selected="true" aria-controls="studioViewport" title="Scene Perception Service (Port 50107)" data-i18n-title="Scene Perception Service (Port 50107)">
                   <span class="tab-icon">👁️</span>
                   <span class="tab-title" data-i18n="Scene Service">Scene Service</span>
                   <span class="tab-port">50107</span>
                 </button>
-                <button type="button" class="studio-service-tab" title="RTAB-Map Mapping (Port 8091)" data-i18n-title="RTAB-Map Mapping (Port 8091)">
+                <button type="button" class="studio-service-tab" role="tab" aria-selected="false" aria-controls="studioViewport" title="RTAB-Map Mapping (Port 8091)" data-i18n-title="RTAB-Map Mapping (Port 8091)">
                   <span class="tab-icon">🗺️</span>
                   <span class="tab-title" data-i18n="SLAM Mapping">SLAM Mapping</span>
                   <span class="tab-port">8091</span>
                 </button>
-                <button type="button" class="studio-service-tab" title="Robonix Fleet Center (Port 4880)" data-i18n-title="Robonix Fleet Center (Port 4880)">
+                <button type="button" class="studio-service-tab" role="tab" aria-selected="false" aria-controls="studioViewport" title="Robonix Fleet Center (Port 4880)" data-i18n-title="Robonix Fleet Center (Port 4880)">
                   <span class="tab-icon">🌐</span>
                   <span class="tab-title" data-i18n="Robonix Hub">Robonix Hub</span>
                   <span class="tab-port">4880</span>
                 </button>
-                <button type="button" class="studio-service-tab" title="Audio Device Service (Port 60001)" data-i18n-title="Audio Device Service (Port 60001)">
+                <button type="button" class="studio-service-tab" role="tab" aria-selected="false" aria-controls="studioViewport" title="Audio Device Server (Port 60001)" data-i18n-title="Audio Device Server (Port 60001)">
                   <span class="tab-icon">🔊</span>
                   <span class="tab-title" data-i18n="Audio Server">Audio Server</span>
                   <span class="tab-port">60001</span>
@@ -758,7 +758,7 @@
               </div>
             </header>
 
-            <div class="studio-viewport" id="studioViewport">
+            <div class="studio-viewport" id="studioViewport" role="tabpanel" aria-label="Studio Service">
               <div class="studio-loading-scrim" id="studioLoadingScrim" hidden>
                 <div class="studio-spinner"></div>
                 <span class="studio-loading-text" data-i18n="Connecting to service...">Connecting to service...</span>
@@ -886,8 +886,8 @@
       </section>
     </div>
 
-    <script src="/static/i18n.js?v=20261019i"></script>
-    <script src="/static/app.js?v=20261019i"></script>
+    <script src="/static/i18n.js?v=20261019j"></script>
+    <script src="/static/app.js?v=20261019j"></script>
     <script src="/static/vitals.bundle.js?v=20261018f"></script>
   </body>
 </html>

@@ -23,31 +23,27 @@
     "Current": "电流",
     "Live vitals": "实时遥测",
     "Connecting": "连接中",
-    "No model": "无模型",
     "Compute node telemetry from Vitals": "来自 Vitals 的计算节点遥测",
     "Audio": "音频",
     "Settings": "设置",
     "Studio": "控制台",
     "Robonix Studio": "Robonix 控制台",
+    "Studio Services": "服务列表",
+    "Studio Service": "服务内容",
     "Integrated Service Cockpit": "集成服务面板",
     "Scene Service": "场景服务",
     "SLAM Mapping": "SLAM 建图",
-    "Mapping Service": "建图服务",
     "Robonix Hub": "Robonix Hub",
-    "Fleet Hub": "机群中心",
     "Audio Server": "音频服务",
     "Scene Perception Service (Port 50107)": "场景感知服务（端口 50107）",
     "RTAB-Map Mapping (Port 8091)": "RTAB-Map 建图（端口 8091）",
     "Robonix Fleet Center (Port 4880)": "Robonix 机群中心（端口 4880）",
     "Audio Device Server (Port 60001)": "音频设备服务（端口 60001）",
-    "Audio Reverse Bridge": "音频桥接",
-    "Perception Logs": "感知日志",
     "Reload": "刷新",
     "Open External": "外部打开",
     "External": "外部打开",
     "Toggle Fullscreen": "全屏切换",
     "Connecting to service...": "正在连接微服务...",
-    "Service Online": "服务在线",
     "Services Online": "个服务在线",
     "Rescan": "重新探测",
     "Rescan Services": "重新探测本体微服务",
@@ -56,8 +52,6 @@
     "Retry Scan": "重新探测",
     "Robonix Hub runs with strict origin isolation. Click below to launch in a dedicated tab.": "Robonix Hub 采用严格的独立窗口安全策略运行，请点击下方在专属标签页打开。",
     "Open in External Tab": "在新标签页打开",
-    "Vision Service": "视觉服务",
-    "Foxglove Studio": "Foxglove 调试",
     "Switch language": "切换语言",
     "Robonix Client": "Robonix 客户端",
     "Session": "会话",
@@ -109,7 +103,6 @@
     "recording": "录制中",
     "ready": "就绪",
     "Show RTDL": "查看 RTDL",
-    "Activity": "活动",
     "{count} activity events": "{count} 条活动",
     "Expand activity": "展开活动",
     "Collapse activity": "收起活动",
@@ -236,9 +229,6 @@
     "No task events yet.": "暂无任务事件。",
     "event(s)": "条事件",
     "Event Log": "事件日志",
-    "Execution Tree": "执行树",
-    "No active action sequence": "暂无活动动作序列",
-    "Step": "步骤",
     "Live plans reported by Executor": "Executor 报告的实时计划",
     "Close active RTDL": "关闭活动 RTDL",
     "Completed RTDL plans for this client session": "此客户端会话已完成的 RTDL 计划",
@@ -513,7 +503,6 @@
     "OK": "正常",
     "UNKNOWN": "未知",
     "IDLE": "空闲",
-    "EXECUTING": "执行中",
     "STALE": "数据过期",
     "WARN": "警告",
     "ERROR": "错误",
@@ -607,10 +596,19 @@
   };
 
   // Legacy status rows stored the translated text instead of the key. Build a
-  // reverse table so those rows can still follow a language switch.
+  // reverse table so those rows can still follow a language switch. A Chinese
+  // string shared by several English keys cannot be reversed without guessing,
+  // so those are dropped rather than mapped to whichever key came first.
   const zhReverse = new Map();
+  const ambiguousZh = new Set();
   Object.entries(zhCN).forEach(([key, value]) => {
-    if (typeof value === "string" && !zhReverse.has(value)) zhReverse.set(value, key);
+    if (typeof value !== "string") return;
+    if (zhReverse.has(value)) {
+      ambiguousZh.add(value);
+      zhReverse.delete(value);
+      return;
+    }
+    if (!ambiguousZh.has(value)) zhReverse.set(value, key);
   });
 
   function detectLang() {
@@ -702,6 +700,10 @@
     setLang,
     toggle: () => setLang(current === "zh" ? "en" : "zh"),
     lang: () => current,
+    // Re-walk the document for data-i18n* attributes. Callers that restore
+    // markup they had removed need it, because applyDocument() only ever sees
+    // what is in the document at the moment the language changes.
+    applyDocument,
   };
 
   document.documentElement.lang = current === "zh" ? "zh-CN" : "en";
