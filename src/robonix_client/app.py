@@ -335,10 +335,10 @@ async def perception_map(atlas: str = Query(DEFAULT_ATLAS)) -> dict[str, Any]:
 # Dynamic Robot Ontology Studio Discovery
 
 CANDIDATE_STUDIO_PORTS = [
-    50107,  # Scene Perception Suite
+    50107,  # Scene Perception Service
     8091,   # RTAB-Map SLAM Mapping
     4880,   # Robonix Hub
-    60001,  # Audio Device Server
+    60001,  # Audio Device Service
     8080,   # Standard Robotics WebUI
     8085,   # Arm / Hand / Manipulator Control WebUI
     8765,   # Foxglove Studio Bridge / Web
@@ -368,13 +368,13 @@ def _probe_http_port_sync(host: str, port: int, timeout: float = 0.35) -> dict[s
 def _infer_service_metadata(port: int, raw_title: str) -> dict[str, str]:
     tl = raw_title.lower()
     if port == 50107 or "scene" in tl:
-        return {"name": "Scene Service", "icon": "👁️", "desc": "Scene Perception Suite"}
+        return {"name": "Scene Service", "icon": "👁️", "desc": "Scene Perception Service"}
     if port == 8091 or "mapping" in tl or "slam" in tl:
         return {"name": "SLAM Mapping", "icon": "🗺️", "desc": "RTAB-Map SLAM Console"}
     if port == 4880 or "hub" in tl:
-        return {"name": "Robonix Hub", "icon": "🌐", "desc": "Fleet Portal Dashboard"}
+        return {"name": "Robonix Hub", "icon": "🌐", "desc": "Robot Fleet Center"}
     if port == 60001 or "audio" in tl:
-        return {"name": "Audio Server", "icon": "🔊", "desc": "Audio Device Server"}
+        return {"name": "Audio Server", "icon": "🔊", "desc": "Audio Device Service"}
     if port == 8085 or "arm" in tl or "hand" in tl:
         return {"name": "Manipulator Control", "icon": "🦾", "desc": "Arm & Hand WebUI"}
     if port == 8765 or "foxglove" in tl:
