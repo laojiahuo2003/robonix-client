@@ -759,7 +759,10 @@ h2 {
   display: grid;
   grid-template-rows: auto auto minmax(0, auto);
   min-height: 150px;
-  max-height: 240px;
+  /* Room for the source pill, the call name, the four call fields and the
+     args block; anything longer scrolls (the panel keeps overflow: auto from
+     .dashboard-sidebar > .panel, and the scrollbars are hidden globally). */
+  max-height: 340px;
 }
 
 .execution-panel {
@@ -2543,8 +2546,7 @@ select:focus {
 }
 
 .map-stage,
-.camera-feed,
-.goal-preview {
+.camera-feed {
   position: relative;
   height: calc(100% - 35px);
   min-height: 146px;
@@ -2609,8 +2611,7 @@ select:focus {
   border-radius: 8px;
 }
 
-.camera-feed img,
-.goal-preview img {
+.camera-feed img {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -2659,6 +2660,9 @@ select:focus {
 .goal-preview {
   padding: 10px 12px 12px;
   background: transparent;
+  /* The goal card is plain text that grows with the plan, so this box must
+     stay content-sized: a fixed height here would clip the call fields and
+     the args block instead of letting the panel scroll. */
   min-height: 0;
 }
 
