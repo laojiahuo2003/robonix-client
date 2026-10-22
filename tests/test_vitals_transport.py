@@ -372,6 +372,86 @@ class ComponentHealthTest(unittest.TestCase):
             ["body/base/battery/soc"],
         )
 
+    def test_falls_back_to_online_flag_when_telemetry_is_absent(self):
+        rows = aggregate_component_health(
+            self.description,
+            [],
+            [
+                {
+                    "key": "body",
+                    "health": "ok",
+                    "components": [{"id": "body/head_camera", "enabled": True}],
+                }
+            ],
+        )
+        health = {row["componentId"]: row for row in rows}
+
+        camera = health["body/head_camera"]
+        self.assertEqual(camera["health"], "ok")
+        self.assertEqual(camera["directHealth"], "ok")
+        self.assertEqual(camera["detail"], "online, no health data")
+        self.assertEqual(camera["sourceComponentId"], "body/head_camera")
+
+    def test_keeps_unobserved_component_unknown(self):
+        """Soma reports a component nothing observed as offline, so a false
+        `enabled` cannot tell offline from never seen."""
+        rows = aggregate_component_health(
+            self.description,
+            [],
+            [
+                {
+                    "key": "body",
+                    "health": "ok",
+                    "components": [{"id": "body/head_camera", "enabled": False}],
+                }
+            ],
+        )
+        health = {row["componentId"]: row for row in rows}
+        self.assertEqual(health["body/head_camera"]["health"], "unknown")
+
+    def test_ignores_actuator_torque_flag(self):
+        """An actuator's `enabled` is torque; torque on says nothing about health."""
+        rows = aggregate_component_health(
+            self.description,
+            [],
+            [
+                {
+                    "key": "body",
+                    "health": "ok",
+                    "components": [
+                        {"id": "body/head_camera", "enabled": True, "kind": "gripper"}
+                    ],
+                }
+            ],
+        )
+        health = {row["componentId"]: row for row in rows}
+        self.assertEqual(health["body/head_camera"]["health"], "unknown")
+
+    def test_direct_telemetry_takes_precedence_over_online_flag(self):
+        signals = [
+            {
+                "key": "body/head_camera/stream",
+                "health": "warn",
+                "detail": "camera degraded",
+            }
+        ]
+        rows = aggregate_component_health(
+            self.description,
+            signals,
+            [
+                {
+                    "key": "body",
+                    "health": "ok",
+                    "components": [{"id": "body/head_camera", "enabled": False}],
+                }
+            ],
+        )
+        health = {row["componentId"]: row for row in rows}
+
+        camera = health["body/head_camera"]
+        self.assertEqual(camera["health"], "warn")
+        self.assertEqual(camera["detail"], "camera degraded")
+
     def test_marks_disabled_actuator_idle_without_changing_health(self):
         signals = [
             {
