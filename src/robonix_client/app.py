@@ -15,7 +15,6 @@ import urllib.request
 import grpc
 import yaml
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
-from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -50,7 +49,6 @@ from .transport import (
 STATIC_DIR = Path(__file__).with_name("static")
 
 app = FastAPI(title="Robonix Client", version="0.1.0")
-app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
 class _RevalidatingStaticFiles(StaticFiles):
@@ -340,7 +338,7 @@ async def perception_map(atlas: str = Query(DEFAULT_ATLAS)) -> dict[str, Any]:
 CANDIDATE_STUDIO_PORTS = [
     50107,  # Scene Perception Service
     8091,   # RTAB-Map SLAM Mapping
-    4880,   # Robonix Hub
+    4880,   # Robonix Console
     60001,  # Audio Device Service
     8080,   # Standard Robotics WebUI
     8085,   # Arm / Hand / Manipulator Control WebUI
@@ -366,25 +364,70 @@ def _probe_http_port_sync(host: str, port: int, timeout: float = 0.35) -> dict[s
         return None
 
 
+def _title_has_word(title_lower: str, *words: str) -> bool:
+    """Whole-word match against a page title.
+
+    Substring matching mislabels services: "hub" matches "github", "arm"
+    matches "alarm". This scan is a stopgap until packages declare their own
+    web pages in the Atlas directory (syswonder/robonix#292); until then the
+    guess is at least anchored to word boundaries.
+    """
+    return any(re.search(rf"\b{re.escape(w)}\b", title_lower) for w in words)
+
+
 def _infer_service_metadata(port: int, raw_title: str) -> dict[str, str]:
     tl = raw_title.lower()
-    if port == 50107 or "scene" in tl:
+    if port == 50107 or _title_has_word(tl, "scene"):
         return {"name": "Scene Service", "icon": "👁️"}
-    if port == 8091 or "mapping" in tl or "slam" in tl:
+    if port == 8091 or _title_has_word(tl, "mapping", "slam"):
         return {"name": "SLAM Mapping", "icon": "🗺️"}
-    if port == 4880 or "hub" in tl:
-        return {"name": "Robonix Hub", "icon": "🌐"}
-    if port == 60001 or "audio" in tl:
+    if port == 4880 or _title_has_word(tl, "console"):
+        return {"name": "Robonix Console", "icon": "🌐"}
+    if port == 60001 or _title_has_word(tl, "audio"):
         return {"name": "Audio Server", "icon": "🔊"}
-    if port == 8085 or "arm" in tl or "hand" in tl:
+    if port == 8085 or _title_has_word(tl, "arm", "hand"):
         return {"name": "Manipulator Control", "icon": "🦾"}
-    if port == 8765 or "foxglove" in tl:
+    if port == 8765 or _title_has_word(tl, "foxglove"):
         return {"name": "Foxglove Bridge", "icon": "🦊"}
     clean_title = raw_title.replace("Robonix · ", "").replace("robonix ", "").strip()
     return {
         "name": clean_title or f"Service {port}",
         "icon": "⚙️",
     }
+
+
+# A caller may supply a few of its own ports, but the scan must stay bounded:
+# an unbounded list turns this endpoint into an arbitrary port scanner and can
+# exhaust the probe thread pool.
+MAX_STUDIO_EXTRA_PORTS = 8
+
+# Cloud instance metadata services answer on these addresses and hand out
+# credentials to any process that can reach them. Refuse to let the scan be
+# pointed at them even though this client is not expected to run in the cloud.
+_BLOCKED_SCAN_HOSTS = frozenset({"169.254.169.254", "fd00:ec2::254"})
+
+
+def _validate_studio_host(raw: str) -> str | None:
+    """Return a single, scannable host, or None if the input is not one.
+
+    The scan probes whatever host the browser sends, so without this it can be
+    aimed at any host the client machine can reach. Accept one bare hostname or
+    IP only: anything carrying a scheme, path, credentials, or a separator that
+    could smuggle a second target is rejected, as are the cloud metadata hosts.
+    """
+    host = (raw or "").strip()
+    if not host:
+        return "127.0.0.1"
+    # A legitimate host has none of these; each is a way to express a second
+    # target or a non-HTTP destination the scan has no business reaching.
+    if any(c in host for c in (" ", "\t", ",", "/", "\\", "@", "?", "#")) or "://" in host:
+        return None
+    # urlparse pulls the bare hostname out of an optional "host:port"; a well
+    # formed single host round-trips through it unchanged.
+    parsed = urlparse(f"//{host}")
+    if not parsed.hostname or parsed.hostname in _BLOCKED_SCAN_HOSTS:
+        return None
+    return parsed.hostname
 
 
 @app.get("/api/studio/services")
@@ -396,12 +439,19 @@ async def discover_studio_services(
         robot_host = "127.0.0.1"
     if not isinstance(extra_ports, str):
         extra_ports = ""
-    host = robot_host.strip() or "127.0.0.1"
+    host = _validate_studio_host(robot_host)
+    if host is None:
+        return {"ok": False, "error": "invalid robot host", "services": []}
     # Named ports_set before, but it was a list and the set semantics never
     # existed: CANDIDATE_STUDIO_PORTS order is what the tabs come out in.
     ports = list(CANDIDATE_STUDIO_PORTS)
     if extra_ports:
-        for ep in extra_ports.split(","):
+        added = 0
+        # Only inspect as many tokens as could ever be accepted, so a payload of
+        # thousands of (even duplicate) entries cannot spin the parse loop.
+        for ep in extra_ports.split(",")[: MAX_STUDIO_EXTRA_PORTS * 4]:
+            if added >= MAX_STUDIO_EXTRA_PORTS:
+                break
             with suppress(ValueError):
                 p = int(ep.strip())
                 # urllib does not reject a port above 65535: 99999 wraps to
@@ -409,6 +459,7 @@ async def discover_studio_services(
                 # on an unrelated port with a URL nobody can open.
                 if 1 <= p <= 65535 and p not in ports:
                     ports.append(p)
+                    added += 1
 
     tasks = [asyncio.to_thread(_probe_http_port_sync, host, port) for port in ports]
     results = await asyncio.gather(*tasks)

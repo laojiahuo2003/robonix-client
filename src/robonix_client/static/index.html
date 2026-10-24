@@ -715,28 +715,9 @@
                 </div>
               </div>
 
-              <div class="studio-services-nav" id="studioServicesNav" role="tablist" aria-label="Studio Services" data-i18n-aria-label="Studio Services">
-                <button type="button" class="studio-service-tab active" role="tab" aria-selected="true" aria-controls="studioViewport" title="Scene Perception Service (Port 50107)" data-i18n-title="Scene Perception Service (Port 50107)">
-                  <span class="tab-icon">👁️</span>
-                  <span class="tab-title" data-i18n="Scene Service">Scene Service</span>
-                  <span class="tab-port">50107</span>
-                </button>
-                <button type="button" class="studio-service-tab" role="tab" aria-selected="false" aria-controls="studioViewport" title="RTAB-Map Mapping (Port 8091)" data-i18n-title="RTAB-Map Mapping (Port 8091)">
-                  <span class="tab-icon">🗺️</span>
-                  <span class="tab-title" data-i18n="SLAM Mapping">SLAM Mapping</span>
-                  <span class="tab-port">8091</span>
-                </button>
-                <button type="button" class="studio-service-tab" role="tab" aria-selected="false" aria-controls="studioViewport" title="Robonix Fleet Center (Port 4880)" data-i18n-title="Robonix Fleet Center (Port 4880)">
-                  <span class="tab-icon">🌐</span>
-                  <span class="tab-title" data-i18n="Robonix Hub">Robonix Hub</span>
-                  <span class="tab-port">4880</span>
-                </button>
-                <button type="button" class="studio-service-tab" role="tab" aria-selected="false" aria-controls="studioViewport" title="Audio Device Server (Port 60001)" data-i18n-title="Audio Device Server (Port 60001)">
-                  <span class="tab-icon">🔊</span>
-                  <span class="tab-title" data-i18n="Audio Server">Audio Server</span>
-                  <span class="tab-port">60001</span>
-                </button>
-              </div>
+              <!-- Tabs are built from the discovery scan (renderStudioTabs);
+                   an empty result shows the empty state, not a fixed list. -->
+              <div class="studio-services-nav" id="studioServicesNav" role="tablist" aria-label="Studio Services" data-i18n-aria-label="Studio Services"></div>
 
               <div class="studio-actions">
                 <button type="button" class="studio-action-btn" id="studioRescanBtn" title="Rescan Services" data-i18n-title="Rescan Services">

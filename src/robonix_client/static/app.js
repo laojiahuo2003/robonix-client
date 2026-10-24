@@ -5373,28 +5373,16 @@ function getStudioServiceUrl(port, isExternal = false) {
   return `http://${host}:${port}/`;
 }
 
-// The four shipped service tabs are static markup, not built by this function.
-// Remember them once so an empty discovery result can put them back: rebuilding
-// the strip on a language switch used to clear them and return early, leaving
-// the Studio header with no service tabs at all.
-let studioStaticTabsMarkup = null;
-
+// Tabs are built entirely from the discovery scan. There are no shipped
+// default tabs: an empty result clears the strip and the empty state carries
+// the message, rather than showing a fixed list of services that may not exist.
 function renderStudioTabs() {
   const nav = document.getElementById("studioServicesNav");
   if (!nav) return;
-  if (studioStaticTabsMarkup === null) studioStaticTabsMarkup = nav.innerHTML;
-
-  if (!studioDiscoveredServices.length) {
-    nav.innerHTML = studioStaticTabsMarkup;
-    // Nothing is framed when no service is selected, so no tab is active.
-    nav.querySelectorAll(".studio-service-tab.active").forEach((tab) => tab.classList.remove("active"));
-    // The restored nodes are fresh, so the current language has to be applied
-    // again; applyDocument() already ran before this render.
-    window.RobonixI18N?.applyDocument?.();
-    return;
-  }
 
   nav.innerHTML = "";
+  if (!studioDiscoveredServices.length) return;
+
   studioDiscoveredServices.forEach((s) => {
     const btn = document.createElement("button");
     btn.type = "button";
@@ -5577,7 +5565,7 @@ function switchStudioServiceByPort(port) {
 
   let hubCard = vp ? vp.querySelector(".studio-hub-launch-card") : null;
 
-  // Port 4880 (Robonix Hub) sets X-Frame-Options: DENY, cannot be embedded inside iframe directly
+  // Port 4880 (Robonix Console) sets X-Frame-Options: DENY, cannot be embedded inside iframe directly
   if (numPort === 4880) {
     if (scrim) scrim.hidden = true;
     if (frame) frame.style.display = "none";
@@ -5586,8 +5574,9 @@ function switchStudioServiceByPort(port) {
       hubCard.className = "studio-hub-launch-card studio-empty-state";
       hubCard.innerHTML = `
         <div class="studio-empty-icon">🌐</div>
-        <h3>Robonix Hub</h3>
-        <p class="studio-empty-desc" data-i18n="Robonix Hub runs with strict origin isolation. Click below to launch in a dedicated tab.">${t("Robonix Hub runs with strict origin isolation. Click below to launch in a dedicated tab.")}</p>
+        <h3>Robonix Console</h3>
+        <p class="studio-empty-desc" data-i18n="Robonix Console runs with strict origin isolation. Click below to launch in a dedicated tab.">${t("Robonix Console runs with strict origin isolation. Click below to launch in a dedicated tab.")}</p>
+        <p class="studio-empty-desc" data-i18n="If the Console binds to the robot's loopback address, it is only reachable from the robot itself.">${t("If the Console binds to the robot's loopback address, it is only reachable from the robot itself.")}</p>
         <button type="button" class="studio-empty-scan-btn" id="studioOpenHubDirect">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
           <span data-i18n="Open in External Tab">${t("Open in External Tab")}</span>
