@@ -757,23 +757,30 @@ h2 {
 
 .dashboard-sidebar > .current-goal-panel {
   display: grid;
-  grid-template-rows: 52px 38px minmax(0, 1fr) 116px;
-  height: 420px;
-  min-height: 420px;
-  max-height: 420px;
+  grid-template-rows: 40px 116px minmax(0, 1fr);
+  height: 380px;
+  min-height: 380px;
+  max-height: 380px;
   overflow: hidden;
 }
 
-.current-goal-panel:has(.task-list[hidden]) .goal-preview {
-  grid-row: 3 / 5;
-}
-
-.current-goal-panel > .goal-line {
+.current-goal-panel > .task-list { grid-row: 2; }
+.current-goal-panel > .executor-panel {
+  grid-row: 3;
+  display: grid;
+  grid-template-rows: 40px minmax(0, 1fr);
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  border-top: 1px solid var(--line-soft);
 }
+.executor-panel > .executor-label {
+  display: flex;
+  align-items: center;
+  margin: 0;
+  padding: 0 12px;
+}
+
 
 .execution-panel {
   grid-template-rows: auto auto minmax(140px, auto) auto auto;
@@ -2592,7 +2599,8 @@ select:focus {
 }
 
 .goal-card strong {
-  font-size: 15px;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .goal-card span {
@@ -5941,7 +5949,9 @@ select:focus {
    needs a definite height. The first content-sized box in that chain would
    collapse the tree back to its drawing size, which is what used to leave the
    viewport a small strip at the top of the panel. */
+/* Keep the tree in the flexible row even when the summary header is hidden. */
 .dashboard-sidebar > .panel[data-sidebar-panel="rtdl"]:not([hidden]) .execution-table {
+  grid-row: 2;
   display: flex;
   flex-direction: column;
   max-height: none;
@@ -6073,3 +6083,167 @@ select:focus {
     opacity: 0.45;
   }
 }
+
+.task-scope-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  margin-left: auto;
+}
+.task-scope-button {
+  min-height: 24px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.task-list-row[aria-pressed="true"] {
+  background: rgba(72, 166, 223, 0.055);
+  border-color: transparent;
+  box-shadow: inset 2px 0 var(--line);
+}
+.task-list-row {
+  width: 100%;
+  height: 24px;
+  min-width: 0;
+  border: 1px solid transparent;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  line-height: 14px;
+  padding: 3px 8px;
+}
+.task-list-row:hover {
+  background: rgba(72, 166, 223, 0.12);
+}
+.task-list-row:focus-visible,
+.task-scope-button:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: -2px;
+}
+.goal-call-grid strong {
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.goal-preview::-webkit-scrollbar,
+.task-list::-webkit-scrollbar {
+  display: block !important;
+  width: 5px !important;
+}
+.goal-preview::-webkit-scrollbar-thumb,
+.task-list::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 4px;
+}
+
+/* Scope controls are secondary to the selected task. */
+.task-scope-button,
+.task-scope-button[aria-pressed="true"] {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+.task-scope-button::before {
+  content: "";
+  display: inline-block;
+  width: 12px;
+  margin-right: 3px;
+}
+.task-scope-button[aria-pressed="true"]::before {
+  content: "✓";
+}
+.task-scope-button[aria-pressed="true"] { color: var(--muted); }
+.task-scope-button:hover {
+  color: var(--text);
+  border-color: transparent;
+  background: rgba(255, 255, 255, 0.035);
+}
+.current-goal-panel .sidebar-status-chip.running {
+  border-color: var(--line-soft);
+  background: transparent;
+}
+.current-goal-panel .sidebar-status-chip.running .status-dot {
+  box-shadow: none;
+  animation: none;
+}
+
+.call-detail-trigger { justify-self: start; padding: 0; font-size: 11px; }
+.call-detail-modal {
+  padding: 0;
+  color: var(--text);
+  background: var(--panel, #101c22);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.call-detail-modal:not([open]) { display: none; }
+.call-detail-modal::backdrop { background: rgba(0, 0, 0, 0.65); }
+.call-detail-body { min-height: 0; overflow: auto; padding: 16px; }
+.call-detail-body .goal-call-grid strong { white-space: normal; overflow-wrap: anywhere; }
+.call-detail-body p { color: var(--muted); font-size: 12px; }
+.call-detail-body .args { max-height: none; white-space: pre-wrap; overflow-wrap: anywhere; }
+#openActiveRtdl { margin-left: 8px; }
+.goal-card .call-detail-trigger {
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: rgba(72, 166, 223, 0.07);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+}
+.call-detail-trigger::after { content: " ↗"; margin-left: 6px; }
+.goal-card .call-detail-trigger:hover { border-color: var(--muted); background: rgba(72, 166, 223, 0.13); }
+.call-detail-trigger:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.execution-summary-status { font-size: 11px; color: var(--muted); }
+.execution-summary-status[data-status="Executing now"]::before { content: "● "; color: var(--cyan); }
+.execution-summary-status[data-status="completed"]::before { content: "✓ "; }
+
+.goal-card {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+.goal-card > .execution-heading {
+  grid-column: 1;
+  grid-row: 1;
+}
+.goal-card > .call-detail-trigger {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+  white-space: nowrap;
+}
+.goal-card > strong,
+.goal-card > .goal-call-grid,
+.goal-card > span:not(.execution-summary-status) {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.execution-panel > .panel-header[hidden] { display: none; }
+
+.execution-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  min-width: 0;
+}
+.executor-label { font-size: 14px; line-height: 1.2; font-weight: 720; letter-spacing: 0; color: var(--text); }
+
+.goal-preview > .goal-card + .goal-card { border-top: 1px solid var(--line-soft); margin-top: 14px; padding-top: 14px; }
+
+
+
+.saved-plan-task { border-top: 1px solid var(--line-soft); padding: 12px 0; }
+.saved-plan-task h3 { font-size: 13px; margin: 0 0 8px; }
+.saved-plan-task summary { cursor: pointer; padding: 8px 0; }
+.saved-plan-task p, .active-rtdl-modal-body > p { color: var(--muted); font-size: 12px; }
+.saved-plan-node { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px; }
+.saved-plan-node span { min-width: 0; overflow-wrap: anywhere; }
+.saved-plan-node button { flex-shrink: 0; }

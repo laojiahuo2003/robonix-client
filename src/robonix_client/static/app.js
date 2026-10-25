@@ -32,8 +32,12 @@ const state = {
   timeline: [],
   plan: null,
   planRecords: [],
+  pendingPlanResults: new Map(),
+  lastExecutionByTask: new Map(),
   taskState: null,
   taskStateStale: false,
+  selectedTaskId: "",
+  followLatestTask: true,
   sidebarView: "rtdl",
   batches: [],
   nodeStates: {},
@@ -204,29 +208,19 @@ function hasConversationContent(conversation = null) {
 function loadConversations() {
   try {
     const raw = JSON.parse(localStorage.getItem("robonix.conversations") || "[]");
-    if (Array.isArray(raw)) {
-      return raw.filter((c) => hasConversationContent(c));
+    let conversations = Array.isArray(raw) ? raw.filter(c => hasConversationContent(c)) : [];
+    // Remove pre-task-ownership snapshots once; new conversations may still be awaiting their first event.
+    if (localStorage.getItem("robonix.taskOwnershipCleanup") !== "1") {
+      conversations = conversations.filter(c => Array.isArray(c.taskState?.tasks)
+        && c.taskState.tasks.every(task => Array.isArray(task.planIds)));
+      localStorage.setItem("robonix.conversations", JSON.stringify(conversations));
+      localStorage.removeItem("robonix.history");
+      if (!conversations.some(c => c.id === localStorage.getItem("robonix.lastSessionId"))) {
+        localStorage.removeItem("robonix.lastSessionId");
+      }
+      localStorage.setItem("robonix.taskOwnershipCleanup", "1");
     }
-  } catch (_) {
-    // Fall through to one-time migration from the old prompt-only history.
-  }
-  try {
-    const oldHistory = JSON.parse(localStorage.getItem("robonix.history") || "[]");
-    if (!Array.isArray(oldHistory)) return [];
-    return oldHistory
-      .slice(0, 18)
-      .filter((item) => item.text && item.text.trim())
-      .map((item) => ({
-        id: getSessionId(),
-        title: truncateTitle(item.text, 24) || t("Untitled chat"),
-        customTitle: false,
-        updatedAt: item.at || Date.now(),
-        messages: [{ id: getSessionId(), role: "user", text: item.text, meta: "" }],
-        timeline: [],
-        plan: null,
-        batches: [],
-        nodeStates: {},
-      }));
+    return conversations;
   } catch (_) {
     return [];
   }
@@ -306,6 +300,8 @@ function restoreLastSession(sessionId = "") {
   // the next message, or a turn that was still streaming) overwrites it.
   state.taskState = conversation.taskState || null;
   state.taskStateStale = Boolean(state.taskState);
+  state.selectedTaskId = conversation.selectedTaskId || "";
+  state.followLatestTask = conversation.followLatestTask !== false;
   return true;
 }
 
@@ -631,11 +627,18 @@ function bindEvents() {
   maybe("rtdlHistoryModal")?.addEventListener("click", (event) => {
     if (event.target === event.currentTarget) closeRtdlHistory();
   });
+  maybe("closeCallDetail")?.addEventListener("click", () => $("callDetailModal").close());
+  maybe("callDetailModal")?.addEventListener("click", event => {
+    if (event.target !== event.currentTarget) return;
+    const r = event.currentTarget.getBoundingClientRect();
+    if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) event.currentTarget.close();
+  });
   maybe("closeNodeDetail")?.addEventListener("click", closeNodeDetail);
   maybe("nodeDetailModal")?.addEventListener("click", (event) => {
     if (event.target === event.currentTarget) closeNodeDetail();
   });
   window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && maybe("callDetailModal")?.open) return;
     if (event.key === "Escape" && !maybe("activeRtdlModal")?.hidden) closeActiveRtdl();
     if (event.key === "Escape" && !maybe("rtdlHistoryModal")?.hidden) closeRtdlHistory();
     if (event.key === "Escape" && !maybe("nodeDetailModal")?.hidden) closeNodeDetail();
@@ -646,6 +649,7 @@ function openActiveRtdl() {
   const modal = maybe("activeRtdlModal");
   if (!modal) return;
   modal.hidden = false;
+  renderSavedPlans();
   refreshActivePlans();
   maybe("closeActiveRtdl")?.focus();
 }
@@ -943,6 +947,11 @@ function forgetActiveTurn() {
   state.activePilotSessionId = "";
   state.taskState = null;
   state.taskStateStale = false;
+  state.selectedTaskId = "";
+  state.followLatestTask = true;
+  state.pendingPlanResults.clear();
+  state.lastExecutionByTask.clear();
+  treeViewStates.clear();
   state.taskRunning = false;
   state.turnReplied = false;
   state.lastTaskStatusKey = "";
@@ -1281,6 +1290,11 @@ function handlePilotEvent(event) {
   } else if (event.kind === "task_state" && event.taskState) {
     state.taskState = event.taskState;
     state.taskStateStale = false;
+    if (!state.followLatestTask
+        && !(event.taskState.tasks || []).some(task => task.taskId === state.selectedTaskId)) {
+      state.selectedTaskId = "";
+      state.followLatestTask = true;
+    }
     const taskStatus = String(event.taskState.status || "").trim().toLowerCase();
     state.taskRunning = snapshotHasActiveTasks(event.taskState);
     if (state.taskRunning) {
@@ -1347,16 +1361,27 @@ function upsertPlanRecord(plan) {
     state.planRecords.unshift({ key, plan, nodeStates: {}, batches: [], updatedAt: Date.now() });
     state.planRecords = state.planRecords.slice(0, 80);
   }
+  const id = String(plan.planId || "");
+  const pending = state.pendingPlanResults.get(id) || [];
+  state.pendingPlanResults.delete(id);
+  pending.forEach(update => updatePlanRecordResult(id, update));
 }
 
 function updatePlanRecordResult(planId, update) {
   const id = String(planId || "").trim();
   let record = state.planRecords.find((item) => String(item.plan?.planId || "") === id);
-  if (!record && state.plan) {
+  if (!record && state.plan && String(state.plan.planId || "") === id) {
     upsertPlanRecord(state.plan);
     record = state.planRecords.find((item) => item.key === planRecordKey(state.plan));
   }
-  if (!record) return;
+  if (!record) {
+    if (!id) return;
+    const pending = state.pendingPlanResults.get(id) || [];
+    pending.push(update);
+    state.pendingPlanResults.set(id, pending.slice(-256));
+    if (state.pendingPlanResults.size > 80) state.pendingPlanResults.delete(state.pendingPlanResults.keys().next().value);
+    return;
+  }
   update(record);
   record.updatedAt = Date.now();
 }
@@ -1993,36 +2018,56 @@ function renderTimeline() {
   });
 }
 
+function selectedTask() {
+  const tasks = state.taskState?.tasks || [];
+  const pinned = !state.followLatestTask && tasks.find(task => task.taskId === state.selectedTaskId);
+  return pinned || tasks.find(task => task.taskId === state.taskState?.taskId) || tasks.at(-1) || null;
+}
+
+function taskPlanIds() {
+  return new Set((selectedTask()?.planIds || []).map(String));
+}
+
+function scopedPlanRecords() {
+  const ids = taskPlanIds();
+  return normalizedPlanRecords().filter(record => ids.has(String(record.plan.planId)));
+}
+
+function selectTask(taskId = "") {
+  state.followLatestTask = !taskId;
+  state.selectedTaskId = taskId;
+  closeNodeDetail();
+  maybe("callDetailModal")?.close();
+  renderHistoryExecutionDetail(null, "PENDING");
+  document.querySelectorAll("[data-goal-preview]").forEach(root => { root.scrollTop = 0; });
+  renderPlan();
+  persistCurrentConversation();
+}
+
+function scopedPlanEmptyText() {
+  const task = selectedTask();
+  if (!task) return t(normalizedPlanRecords().length ? "Waiting for task ownership information." : "waiting for task");
+  if (!Array.isArray(task.planIds)) return t("Waiting for task ownership information.");
+  return task.planIds.length
+    ? t("Plan ownership is known; tree details have not been received or are no longer saved.")
+    : t("This task has not produced an RTDL plan.");
+}
+
 function renderPlan() {
   const roots = document.querySelectorAll("[data-plan-tree]");
   roots.forEach((root) => clear(root));
   treeLiveKeys = new Set();
-  const records = normalizedPlanRecords();
+  const records = scopedPlanRecords();
+  const contextPlanId = currentExecutionContext()?.plan?.planId;
   const activeRecords = records.filter((record) => recordIsActive(record));
   const latestActiveRecord = activeRecords[0] || null;
   // Keep the running plan if there is one; otherwise keep the most recent
   // completed plan so the execution tree does not flash and vanish on the
   // next executor poll.
-  const displayRecord = latestActiveRecord || records[0] || null;
+  const displayRecord = contextPlanId
+    ? records.find(record => String(record.plan.planId) === String(contextPlanId)) || null
+    : latestActiveRecord || records[0] || null;
   const historyRecords = records.filter((record) => record !== displayRecord);
-  const displayCalls = planCalls(displayRecord?.plan).length;
-
-  if (latestActiveRecord) {
-    setTextAll("[data-plan-summary]", t("{active} active · plan {plan} · round {round} · {calls} call(s)", {
-      active: activeRecords.length,
-      plan: latestActiveRecord.plan.planId || "-",
-      round: latestActiveRecord.plan.round,
-      calls: displayCalls,
-    }));
-  } else if (displayRecord) {
-    setTextAll("[data-plan-summary]", t("Latest plan {plan} (completed) · round {round} · {calls} call(s)", {
-      plan: displayRecord.plan.planId || "-",
-      round: displayRecord.plan.round,
-      calls: displayCalls,
-    }));
-  } else {
-    setTextAll("[data-plan-summary]", t("No RTDL tree in this session yet."));
-  }
 
   if (maybe("rtdlHistoryCount")) $("rtdlHistoryCount").textContent = String(historyRecords.length);
   renderGoalPanel();
@@ -2031,13 +2076,16 @@ function renderPlan() {
     roots.forEach((root) => {
       const empty = document.createElement("div");
       empty.className = "plan-empty";
-      empty.textContent = t("No RTDL plan in this session yet.");
+      empty.textContent = contextPlanId
+        ? t("Active plan {id}: tree details have not been received.", { id: contextPlanId })
+        : scopedPlanEmptyText();
       root.appendChild(empty);
     });
   } else {
     roots.forEach((root) => renderPlanRecord(root, displayRecord, showNodeDetail));
   }
   renderPlanHistory(historyRecords);
+  renderSavedPlans();
   pruneTreeObservers();
   const newest = displayRecord;
   // While the node-detail popup is open, keep showing the node the user clicked
@@ -2062,9 +2110,19 @@ function renderPlanRecord(root, record, onSelect = renderExecutionDetail) {
   wrapper.className = "plan-record";
   const label = document.createElement("div");
   label.className = "plan-record-label";
-  label.textContent = t("Plan {id} · round {round}", { id: record.plan.planId || "-", round: record.plan.round });
-  wrapper.appendChild(label);
   const maps = buildResultMaps(record);
+  const rootNode = record.plan.nodes.find(node => Number(node.index) === Number(record.plan.rootIndex ?? 0));
+  const rootState = String(resultForNode(rootNode, maps)?.state || "").toLowerCase();
+  const results = [...maps.byIndex.values()];
+  const canceled = value => ["canceled", "cancelled", "aborted"].includes(String(value || "").toLowerCase());
+  const planStatus = record.batches?.length
+    ? canceled(rootState) ? "canceled"
+      : record.batches.some(batch => batch.anyFailed) ? "failed"
+      : results.some(result => canceled(result.state)) ? "canceled"
+      : results.some(result => statusKey(result.state) === "failed") ? "failed" : "completed"
+    : recordIsActive(record) ? "running" : "Live status unconfirmed";
+  label.textContent = t("Plan {id} · round {round} · {calls} call(s)", { id: record.plan.planId || "-", round: record.plan.round, calls: planCalls(record.plan).length }) + " · " + t(planStatus);
+  wrapper.appendChild(label);
   const runningIndex = recordIsActive(record)
     ? pickRunningIndex(record.plan, maps.byIndex)
     : null;
@@ -2080,7 +2138,7 @@ function renderPlanHistory(records) {
   if (!records.length) {
     const empty = document.createElement("div");
     empty.className = "plan-empty";
-    empty.textContent = t("No completed RTDL trees yet.");
+    empty.textContent = t("No other plans for this task.");
     root.appendChild(empty);
   }
 }
@@ -2103,7 +2161,8 @@ function pruneTreeObservers() {
   // The view state is only a few numbers, but the map is unbounded: a long
   // session used to keep one entry per plan it ever drew.
   treeViewStates.forEach((_, key) => {
-    if (!treeLiveKeys.has(key)) treeViewStates.delete(key);
+    const retained = normalizedPlanRecords().some(record => key.startsWith(`plan:${record.plan.planId}:`));
+    if (!treeLiveKeys.has(key) && !retained) treeViewStates.delete(key);
   });
 }
 
@@ -2617,7 +2676,10 @@ function recordHasTerminalBatch(record) {
 
 function recordIsActive(record) {
   if (!record?.plan || recordHasTerminalBatch(record)) return false;
-  if (!state.executorPlansReady) return record === normalizedPlanRecords()[0];
+  if (!state.executorPlansReady) {
+    if (state.taskStateStale) return false;
+    return Object.values(record.nodeStates || {}).some(result => statusKey(result.state) === "running");
+  }
   const planId = String(record.plan.planId || "");
   if (state.executorPlanIds.has(planId)) return true;
   return Number(state.executorMissingPolls.get(planId) || 0) < 2;
@@ -2664,6 +2726,56 @@ async function refreshActivePlans() {
     renderActivePlans();
     renderPlan();
   }
+}
+
+function renderSavedPlans() {
+  const root = maybe("savedRtdlList");
+  if (!root) return;
+  const opened = new Set([...root.querySelectorAll("details[open]")].map(el => el.dataset.recordKey));
+  clear(root);
+  const records = normalizedPlanRecords();
+  const tasks = [...(state.taskState?.tasks || [])].reverse();
+  for (const task of tasks) {
+    const ids = new Set((task.planIds || []).map(String));
+    const group = document.createElement("section");
+    group.className = "saved-plan-task";
+    const title = document.createElement("h3");
+    title.textContent = task.goal || task.taskId;
+    group.appendChild(title);
+    const owned = records.filter(record => ids.has(String(record.plan.planId)));
+    if (!owned.length) {
+      const empty = document.createElement("p");
+      empty.textContent = t(ids.size ? "Plan ownership is known; tree details have not been received or are no longer saved." : "This task has not produced an RTDL plan.");
+      group.appendChild(empty);
+    }
+    for (const record of owned) {
+      const details = document.createElement("details");
+      details.dataset.recordKey = `${task.taskId}/${record.key || planRecordKey(record.plan)}`;
+      details.open = opened.has(details.dataset.recordKey);
+      const summary = document.createElement("summary");
+      summary.textContent = t("Plan {id} · round {round} · {calls} call(s)", {id:record.plan.planId, round:record.plan.round, calls:planCalls(record.plan).length});
+      details.appendChild(summary);
+      const maps = buildResultMaps(record);
+      for (const node of record.plan.nodes) {
+        const row = document.createElement("div");
+        row.className = "saved-plan-node";
+        const text = document.createElement("span");
+        text.textContent = `${node.description || node.call?.name || node.opId || node.kind} · ${t(resultForNode(node, maps)?.state || "Live status unconfirmed")}`;
+        row.appendChild(text);
+        if (node.call) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = t("View call details");
+          button.onclick = () => showCallDetails({plan:record.plan, node, op:null, record, source:"Saved execution record"});
+          row.appendChild(button);
+        }
+        details.appendChild(row);
+      }
+      group.appendChild(details);
+    }
+    root.appendChild(group);
+  }
+  if (!tasks.length) root.textContent = t("No saved task plans in this conversation.");
 }
 
 function renderActivePlans(error = "") {
@@ -2859,8 +2971,13 @@ function planCalls(plan) {
   return (plan?.nodes || []).filter((node) => node.call);
 }
 
+function executorNodeForOp(record, op) {
+  const id = String(op?.op_id || op?.opId || "");
+  return id ? record?.plan?.nodes.find(node => String(node.opId) === id) || null : null;
+}
+
 function activePlanNode() {
-  const record = normalizedPlanRecords().find((item) => recordIsActive(item));
+  const record = scopedPlanRecords().find((item) => recordIsActive(item));
   if (!record) return null;
   const maps = buildResultMaps(record);
   const runningIndex = pickRunningIndex(record.plan, maps.byIndex);
@@ -2871,65 +2988,83 @@ function activePlanNode() {
 
 function currentExecutionContext() {
   if (state.executorPlansReady) {
-    for (const plan of state.executorPlans) {
+    const ids = taskPlanIds();
+    const plans = state.executorPlans.filter(plan => ids.has(String(plan.planId)));
+    const records = scopedPlanRecords();
+    plans.sort((a, b) => {
+      const running = plan => (plan.ops || []).some(op => String(op.state).toLowerCase() === "running");
+      const order = plan => {
+        const index = records.findIndex(record => String(record.plan.planId) === String(plan.planId));
+        return index < 0 ? Number.MAX_SAFE_INTEGER : index;
+      };
+      return Number(running(b)) - Number(running(a)) || order(a) - order(b) || String(a.planId).localeCompare(String(b.planId));
+    });
+    for (const plan of plans) {
       const runningOp = (plan.ops || []).find((op) => String(op.state || "").toLowerCase() === "running") || null;
       const record = normalizedPlanRecords().find(
         (item) => String(item.plan?.planId || "") === String(plan.planId || ""),
       );
-      const node = runningOp && record
-        ? record.plan.nodes.find((item) => String(item.opId || "") === String(runningOp.op_id || runningOp.opId || "")) || null
-        : null;
+      const node = runningOp && record ? executorNodeForOp(record, runningOp) : null;
       return {
         source: runningOp ? "Executor verified" : "Executor plan verified",
         plan,
         op: runningOp,
-        node: node || (record ? activeNodeForRecord(record) : null),
+        node,
       };
     }
     return null;
   }
   if (state.taskStateStale) return null;
   const node = activePlanNode();
-  return node ? { source: "Pilot stream estimate", plan: null, op: null, node } : null;
-}
-
-function activeNodeForRecord(record) {
-  const maps = buildResultMaps(record);
-  const runningIndex = pickRunningIndex(record.plan, maps.byIndex);
-  return record.plan.nodes.find((node) => Number(node.index) === Number(runningIndex))
-    || record.plan.nodes.find((node) => node.call)
-    || null;
+  return node ? { source: "Pilot stream estimate", plan: scopedPlanRecords().find(record => record.plan.nodes.includes(node))?.plan || null, op: null, node } : null;
 }
 
 function appendGoalField(root, label, value) {
   const row = document.createElement("div");
   const key = document.createElement("span");
   const content = document.createElement("strong");
+  content.title = String(value || "-");
   key.textContent = label;
   content.textContent = value || "-";
   row.append(key, content);
   root.appendChild(row);
 }
 
-// Shows one row per task once the session has tracked more than one
-// (Pilot's task_state.tasks, added alongside streamed RTDL execution).
-// A single-task session still uses the goal line above instead.
 function renderTaskList() {
   const list = $("taskList");
   if (!list) return;
   const tasks = state.taskState?.tasks || [];
-  if (tasks.length < 2) {
+  const selected = selectedTask();
+  const controls = maybe("taskScopeControls");
+  if (controls) {
+    clear(controls);
+    [["", "Follow latest task"]].forEach(([id, label]) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "task-scope-button";
+      button.textContent = t(label);
+      button.setAttribute("aria-pressed", String(id ? !state.followLatestTask && state.selectedTaskId === id : state.followLatestTask));
+      button.onclick = () => selectTask(id);
+      controls.appendChild(button);
+    });
+  }
+  if (!tasks.length) {
     list.hidden = true;
     clear(list);
     return;
   }
   list.hidden = false;
   const scrollTop = list.scrollTop;
+  const focusedTaskId = list.contains(document.activeElement) ? document.activeElement.dataset.taskId : null;
   clear(list);
-  tasks.forEach((task) => {
+  [...tasks].reverse().forEach((task) => {
     const statusKey = String(task.status || "").trim().toLowerCase();
-    const row = document.createElement("div");
+    const row = document.createElement("button");
+    row.type = "button";
+    row.dataset.taskId = task.taskId;
+    row.setAttribute("aria-pressed", String(task.taskId === selected?.taskId));
     row.className = `task-list-row ${statusKey}`;
+    row.onclick = () => selectTask(task.taskId);
     const dot = document.createElement("span");
     dot.className = "task-list-dot";
     const goal = document.createElement("span");
@@ -2942,87 +3077,179 @@ function renderTaskList() {
     row.append(dot, goal, status);
     list.appendChild(row);
   });
-  list.scrollTop = scrollTop;
+  if (focusedTaskId) [...list.children].find(row => row.dataset.taskId === focusedTaskId)?.focus({ preventScroll: true });
+  list.scrollTop = state.followLatestTask ? 0 : scrollTop;
+}
+
+function showCallDetails(context) {
+  const root = $("callDetailBody");
+  clear(root);
+  const fields = document.createElement("div");
+  fields.className = "goal-call-grid";
+  appendGoalField(fields, t("Provider"), context.node?.call?.providerId || context.op?.provider_id || context.op?.providerId);
+  appendGoalField(fields, t("Contract"), context.node?.call?.contractId || context.op?.contract_id || context.op?.contractId);
+  appendGoalField(fields, t("Plan / node"), `${context.plan?.planId || "-"} / ${context.op?.op_id || context.op?.opId || context.node?.opId || "-"}`);
+  const source = document.createElement("p");
+  source.textContent = t(context.source);
+  const payload = document.createElement("pre");
+  payload.className = "args";
+  const record = context.record || normalizedPlanRecords().find(item => item.plan.planId === context.plan?.planId);
+  payload.textContent = JSON.stringify({
+    call: context.node?.call || context.op || null,
+    result: context.node && record ? resultForNode(context.node, buildResultMaps(record)) : null,
+    plan: context.plan?.planId || null,
+  }, null, 2);
+  root.append(fields, source, payload);
+  $("callDetailModal").showModal();
+}
+
+function executionSummaries() {
+  const task = selectedTask();
+  if (!task) return [];
+  const records = scopedPlanRecords();
+  const ids = taskPlanIds();
+  const terminal = value => {
+    const status = String(value || "").toLowerCase();
+    if (["succeeded", "success", "done", "completed"].includes(status)) return "completed";
+    return ["failed", "canceled", "cancelled", "aborted", "timeout"].includes(status) ? status : null;
+  };
+  const key = context => `${context.plan.planId}/${context.node?.opId || context.op?.op_id || context.op?.opId || context.node?.call?.callId}`;
+  const observed = [];
+  if (state.executorPlansReady) {
+    for (const plan of state.executorPlans.filter(plan => ids.has(String(plan.planId)))) {
+      const record = records.find(record => String(record.plan.planId) === String(plan.planId));
+      for (const op of plan.ops || []) {
+        const node = executorNodeForOp(record, op);
+        const isCall = node ? Boolean(node.call) : op.kind === "do" || (!op.kind && Boolean(op.provider_id || op.contract_id || op.providerId || op.contractId));
+        if (!isCall) continue;
+        const label = String(op.state).toLowerCase() === "running" ? "Executing now" : terminal(op.state);
+        if (label) observed.push({context:{plan, op, node, source:"Executor verified"}, label});
+      }
+    }
+  } else if (!state.taskStateStale) {
+    for (const record of records) {
+      const maps = buildResultMaps(record);
+      for (const node of planCalls(record.plan)) {
+        const result = resultForNode(node, maps);
+        if (String(result?.state).toLowerCase() === "running") {
+          observed.push({context:{plan:record.plan, node, op:null, source:"Pilot stream estimate"}, label:"Executing now"});
+        }
+      }
+    }
+  }
+  let retained = (state.lastExecutionByTask.get(task.taskId) || []).filter(item => ids.has(String(item.context.plan.planId)));
+  const running = observed.filter(item => item.label === "Executing now");
+  if (running.length) {
+    // Keep completed siblings while a parallel group winds down; a new group
+    // replaces the old one once none of its running calls overlap.
+    const overlaps = running.some(item => retained.some(old => key(old.context) === key(item.context)));
+    if (!overlaps) retained = [];
+    for (const item of observed.filter(item => item.label === "Executing now" || retained.some(old => key(old.context) === key(item.context)))) {
+      const index = retained.findIndex(old => key(old.context) === key(item.context));
+      if (index < 0) retained.push(item); else retained[index] = item;
+    }
+  } else {
+    // Fast calls can finish between Executor polls. Their saved terminal
+    // results must advance the summary even if we never observed them running.
+    const retainedIndex = Math.min(...retained.map(item => {
+      const index = records.findIndex(record => String(record.plan.planId) === String(item.context.plan.planId));
+      return index < 0 ? Infinity : index;
+    }));
+    for (const [index, record] of records.entries()) {
+      if (index > retainedIndex) break;
+      const maps = buildResultMaps(record);
+      const finished = planCalls(record.plan).filter(node => {
+        const result = resultForNode(node, maps);
+        return terminal(result?.state) || result?.leafResult;
+      });
+      const observedFinished = observed.filter(item => String(item.context.plan.planId) === String(record.plan.planId));
+      if (!finished.length && !observedFinished.length) continue;
+      if (index < retainedIndex) retained = [];
+      for (const item of observedFinished) {
+        const existing = retained.findIndex(old => key(old.context) === key(item.context));
+        if (existing < 0) retained.push(item); else retained[existing] = item;
+      }
+      for (const node of finished) {
+        const context = {plan:record.plan, node, op:null, source:"Saved execution record"};
+        if (!retained.some(item => key(item.context) === key(context))) {
+          retained.push({context, label:"Live status unconfirmed"});
+        }
+      }
+      break;
+    }
+    if (!retained.length && observed.length) retained = observed;
+  }
+  if (!retained.length) {
+    for (const record of records) {
+      const maps = buildResultMaps(record);
+      retained = planCalls(record.plan).filter(node => resultForNode(node, maps)).map(node => ({
+        context:{plan:record.plan, node, op:null, source:"Saved execution record"}, label:"Live status unconfirmed",
+      }));
+      if (retained.length) break;
+    }
+  }
+  retained = retained.map(item => {
+    const fresh = observed.find(value => key(value.context) === key(item.context));
+    if (fresh) return fresh;
+    const record = records.find(record => String(record.plan.planId) === String(item.context.plan.planId));
+    const node = record && (item.context.op ? executorNodeForOp(record, item.context.op) : record.plan.nodes.find(node => node.opId === item.context.node?.opId));
+    const context = {...item.context, node:node || item.context.node};
+    const result = record && context.node ? resultForNode(context.node, buildResultMaps(record)) : null;
+    const label = terminal(result?.state) || (result?.leafResult ? (result.leafResult.success ? "completed" : "failed") : null)
+      || terminal(item.label) || "Live status unconfirmed";
+    return {context, label};
+  });
+  state.lastExecutionByTask.set(task.taskId, retained);
+  return retained;
 }
 
 function renderGoalPanel() {
   renderTaskList();
-  const task = state.taskState || {};
-  const context = currentExecutionContext();
-  const active = context?.node || null;
-  const taskText = task.goal || task.task || firstUserMessage() || t("waiting for task");
-  const status = task.status || (context ? "executing" : "idle");
-  if (maybe("goalLine")) $("goalLine").textContent = (state.taskStateStale ? t("Last saved state; live Pilot status unavailable.") + " " : "") + t("{status}: {task}", { status: t(status), task: taskText });
-  document.querySelectorAll("[data-goal-preview]").forEach((goal) => {
+  const summaries = executionSummaries();
+  document.querySelectorAll("[data-goal-preview]").forEach(goal => {
     const scrollTop = goal.scrollTop;
-    const detailsOpen = Boolean(goal.querySelector("details")?.open);
     clear(goal);
-    const card = document.createElement("div");
-    card.className = "goal-card";
-    const source = document.createElement("span");
-    source.className = `goal-source${context?.source === "Executor verified" ? " verified" : ""}`;
-    source.textContent = context?.source
-      ? t(context.source)
-      : (state.executorPlansReady ? t("Executor verified") : t("Executor unavailable"));
-    const title = document.createElement("strong");
-    title.textContent = active?.call?.name
-      || context?.op?.description
-      || context?.plan?.description
-      || t("No active Executor call");
-    title.title = title.textContent;
-    card.append(source, title);
-    {
+    (summaries.length ? summaries : [null]).forEach(summary => {
+      const context = summary?.context || null;
+      const card = document.createElement("div");
+      card.className = "goal-card";
+      const executionStatus = document.createElement("span");
+      executionStatus.className = "execution-summary-status";
+      executionStatus.dataset.status = summary?.label || "idle";
+      executionStatus.textContent = t(summary?.label || "idle");
+      const heading = document.createElement("div");
+      heading.className = "execution-heading";
+      heading.appendChild(executionStatus);
+      card.appendChild(heading);
+      const title = document.createElement("strong");
+      title.textContent = context?.node?.call?.name || context?.op?.description || context?.plan?.description
+        || t(state.executorPlansReady && state.executorPlans.some(plan => taskPlanIds().has(String(plan.planId)))
+          ? "Plan executing; waiting for call information." : "No calls yet.");
+      title.title = title.textContent;
       const fields = document.createElement("div");
       fields.className = "goal-call-grid";
-      const providerId = active?.call?.providerId || context?.op?.provider_id || context?.op?.providerId || "-";
-      const contractId = active?.call?.contractId || context?.op?.contract_id || context?.op?.contractId || "-";
-      appendGoalField(fields, t("Provider"), providerId);
-      appendGoalField(fields, t("Contract"), contractId);
-      appendGoalField(
-        fields,
-        t("Operation"),
-        active?.call?.name || (contractId !== "-" ? contractId.split("/").pop() : "") || context?.op?.description || nodeLabel(active || {}),
-      );
-      appendGoalField(
-        fields,
-        t("Plan / node"),
-        `${context?.plan?.planId || "-"} / ${context?.op?.op_id || context?.op?.opId || active?.opId || active?.index || "-"}`,
-      );
-      card.appendChild(fields);
-    }
-    if (!context) {
-      const empty = document.createElement("span");
-      empty.textContent = state.executorPlansReady
-        ? t("Executor reports no running RTDL plan.")
-        : t("Connect to Executor to read the authoritative running call.");
-      card.appendChild(empty);
-    }
-    if (context) {
-      const details = document.createElement("details");
-      details.className = "goal-details";
-      details.open = detailsOpen;
-      const summary = document.createElement("summary");
-      summary.textContent = t("View call details");
-      const detail = document.createElement("pre");
-      detail.className = "goal-json";
-      detail.textContent = JSON.stringify(active?.call || context.op || context.plan, null, 2);
-      details.append(summary, detail);
-      card.appendChild(details);
-    }
-    goal.appendChild(card);
+      if (context) {
+        appendGoalField(fields, t("Provider"), context?.op?.provider_id || context?.op?.providerId || context?.node?.call?.providerId || t("Not provided"));
+        appendGoalField(fields, t("Contract"), context?.op?.contract_id || context?.op?.contractId || context?.node?.call?.contractId || t("Not provided"));
+        appendGoalField(fields, t("Plan / node"), `${context?.plan?.planId || "-"} / ${context?.op?.op_id || context?.op?.opId || context?.node?.opId || "-"}`);
+      }
+      card.append(title);
+      if (context) card.appendChild(fields);
+      if (context) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "call-detail-trigger";
+        button.setAttribute("aria-label", t("View call details"));
+        button.setAttribute("aria-haspopup", "dialog");
+        button.setAttribute("aria-controls", "callDetailModal");
+        button.textContent = t("View call details");
+        button.onclick = () => showCallDetails(context);
+        card.appendChild(button);
+      }
+      goal.appendChild(card);
+    });
     goal.scrollTop = scrollTop;
   });
-}
-
-function goalSummary(node) {
-  const args = node?.call?.args;
-  if (!args || typeof args !== "object") return "";
-  const keys = ["goal", "object_id", "map_id", "target", "query", "text"];
-  const out = {};
-  keys.forEach((key) => {
-    if (args[key] !== undefined) out[key] = args[key];
-  });
-  return Object.keys(out).length ? formatArgs(out) : "";
 }
 
 function currentTaskLabel() {
@@ -3288,6 +3515,8 @@ function persistCurrentConversation(titleHint = "", force = false) {
     batches: state.batches,
     nodeStates: state.nodeStates,
     taskState: state.taskState,
+    selectedTaskId: state.selectedTaskId,
+    followLatestTask: state.followLatestTask,
   };
 
   // Update in place. Hoisting the current conversation to the front on every
@@ -3469,6 +3698,8 @@ function openConversation(sessionId) {
   // (a fresh task_state event, if this session is still live, overwrites it).
   state.taskState = conversation.taskState || null;
   state.taskStateStale = Boolean(state.taskState);
+  state.selectedTaskId = conversation.selectedTaskId || "";
+  state.followLatestTask = conversation.followLatestTask !== false;
   state.activeAgentId = null;
   if (maybe("promptTitle")) $("promptTitle").textContent = conversation.title || t("What should Robonix do?");
   renderSessionChip();

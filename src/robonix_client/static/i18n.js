@@ -12,6 +12,36 @@
   const STORAGE_KEY = "robonix.lang";
 
   const zhCN = {
+    "Plan overview": "计划总览",
+    "Saved plans for all tasks in this conversation": "当前会话全部任务的计划记录",
+    "Saved locally; not a robot-wide execution history.": "本地保存的记录，不是机器人的完整执行历史。",
+    "No saved task plans in this conversation.": "当前会话暂无任务计划记录。",
+    "Not provided": "未提供",
+    "No calls yet.": "暂无调用",
+    "Plan executing; waiting for call information.": "计划执行中，等待具体调用信息",
+    "Executing now": "正在执行",
+    "Saved execution record": "上次执行记录",
+    "Other plans for this task": "本任务其他计划",
+    "Other plans belonging to the selected task, including active plans": "仅显示所选任务的其他计划，包含仍在执行的计划。",
+    "No other plans for this task.": "此任务没有其他计划。",
+    "Saved task state": "任务状态为上次记录",
+    "Live status unconfirmed": "实时状态未确认",
+
+    "Waiting for task ownership information.": "等待任务归属信息。",
+    "Active plan {id}: tree details have not been received.": "活动计划 {id}：树详情尚未收到。",
+    "Saved plan {plan} · round {round} · {calls} call(s); live status unconfirmed": "已保存计划 {plan} · 第 {round} 轮 · {calls} 次调用；实时状态未确认",
+
+    "Task execution": "任务执行",
+    "Select a task to inspect its plans.": "选择任务查看所属执行计划。",
+    "Follow latest task": "跟随最新任务",
+    "Unassigned plans": "未确认归属的计划",
+    "No unassigned RTDL plans in this session.": "此会话没有未确认归属的 RTDL 计划。",
+    "This saved task has no plan ownership data.": "此任务记录没有计划归属信息。",
+    "Plan ownership is known; tree details have not been received or are no longer saved.": "已确认计划归属，树详情尚未收到或已不在本地记录中。",
+    "This task has not produced an RTDL plan.": "此任务尚未产生 RTDL 计划。",
+    "No active Executor plan matches this selection.": "Executor 活动列表中没有与当前选择匹配的计划。",
+    "Robot-wide active plans": "机器人全部活动计划",
+
     // Navigation and shell
     "Workspace": "工作区",
     "Chat": "对话",
@@ -198,6 +228,7 @@
     "Close node detail": "关闭节点详情",
     "Provider, timing and arguments of the selected node.": "所选节点的 Provider、时间与参数。",
     "Plan {id} · round {round}": "计划 {id} · 第 {round} 轮",
+    "Plan {id} · round {round} · {calls} call(s)": "计划 {id} · 第 {round} 轮 · {calls} 次调用",
     "No completed RTDL trees yet.": "暂无已完成的 RTDL 树。",
     "Tree {n}: {label}": "树 {n}：{label}",
     "{active} active · plan {plan} · round {round} · {calls} call(s)": "{active} 个活动 · 计划 {plan} · 第 {round} 轮 · {calls} 次调用",
