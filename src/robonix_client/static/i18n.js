@@ -156,6 +156,7 @@
 
     // Current Goal panel
     "Current Goal": "当前目标",
+    "Last saved state; live Pilot status unavailable.": "上次记录（尚未获取 Pilot 实时状态）。",
     "Current task and selected goal context.": "当前任务与所选目标上下文。",
     "Goal: waiting for a task.": "目标：等待任务。",
     "{status}: {task}": "{status}：{task}",
@@ -508,6 +509,8 @@
     "WARN": "警告",
     "ERROR": "错误",
     "in_progress": "进行中",
+    "View call details": "查看调用详情",
+    "superseded": "已替代",
     "planning": "规划中",
     "executing": "执行中",
     "completed": "已完成",

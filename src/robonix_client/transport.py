@@ -1063,11 +1063,25 @@ def pilot_event_to_dict(event: Any) -> dict[str, Any]:
         data["nodeState"] = node_state_to_dict(event.node_state)
     if hasattr(event, "task_state") and event.HasField("task_state"):
         data["taskState"] = {
+            "taskId": event.task_state.task_id,
             "goal": event.task_state.goal,
             "successCriterion": event.task_state.success_criterion,
             "status": event.task_state.status,
+            "tasks": [task_summary_to_dict(t) for t in event.task_state.tasks],
         }
     return data
+
+
+def task_summary_to_dict(task: Any) -> dict[str, Any]:
+    return {
+        "taskId": task.task_id,
+        "goal": task.goal,
+        "successCriterion": task.success_criterion,
+        "status": task.status,
+        "statusReason": task.status_reason,
+        "messageIds": list(task.message_ids),
+        "planIds": list(task.plan_ids),
+    }
 
 
 def voice_event_to_dict(event: Any) -> dict[str, Any]:

@@ -755,14 +755,24 @@ h2 {
   max-height: 260px;
 }
 
-.current-goal-panel {
+.dashboard-sidebar > .current-goal-panel {
   display: grid;
-  grid-template-rows: auto auto minmax(0, auto);
-  min-height: 150px;
-  /* Room for the source pill, the call name, the four call fields and the
-     args block; anything longer scrolls (the panel keeps overflow: auto from
-     .dashboard-sidebar > .panel, and the scrollbars are hidden globally). */
-  max-height: 340px;
+  grid-template-rows: 52px 38px minmax(0, 1fr) 116px;
+  height: 420px;
+  min-height: 420px;
+  max-height: 420px;
+  overflow: hidden;
+}
+
+.current-goal-panel:has(.task-list[hidden]) .goal-preview {
+  grid-row: 3 / 5;
+}
+
+.current-goal-panel > .goal-line {
+  min-height: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .execution-panel {
@@ -2490,15 +2500,95 @@ select:focus {
 .goal-preview {
   padding: 10px 12px 12px;
   background: transparent;
-  /* The goal card is plain text that grows with the plan, so this box must
-     stay content-sized: a fixed height here would clip the call fields and
-     the args block instead of letting the panel scroll. */
   min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.goal-preview,
+.task-list {
+  scrollbar-width: thin !important;
+  scrollbar-color: var(--line) transparent;
+}
+
+.goal-details summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.task-list[hidden] {
+  display: none;
+}
+
+.task-list {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-rows: 24px;
+  align-content: start;
+  gap: 4px;
+  min-height: 0;
+  max-height: 116px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 0 12px 12px;
+  scrollbar-width: thin;
+}
+
+.task-list-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.task-list-row .task-list-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex: 0 0 auto;
+}
+
+.task-list-row.in_progress .task-list-dot,
+.task-list-row.running .task-list-dot {
+  background: var(--amber);
+}
+
+.task-list-row.failed .task-list-dot {
+  background: var(--red);
+}
+
+.task-list-row .task-list-goal {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-list-row .task-list-status {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .goal-card {
   display: grid;
   gap: 7px;
+}
+
+.goal-card > strong {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 .goal-card strong {
@@ -5836,7 +5926,7 @@ select:focus {
 }
 
 /* The tree and the log panels take the column's remaining height; the goal
-   panel keeps its natural height. */
+   panel keeps its fixed height. */
 .dashboard-sidebar > .panel[data-sidebar-panel="rtdl"]:not([hidden]),
 .dashboard-sidebar > .panel[data-sidebar-panel="events"]:not([hidden]) {
   flex: 1 1 auto;

@@ -11,6 +11,16 @@ const t = (key, params) => (window.RobonixI18N
   )));
 
 const SIDEBAR_VIEWS = ["rtdl", "events"];
+const TASK_ACTIVE = ["in_progress", "running", "planning", "executing"];
+const TASK_TERMINAL = ["done", "completed", "failed", "cancelled", "canceled", "aborted", "superseded"];
+
+function taskIsActive(task) {
+  return TASK_ACTIVE.includes(String(task?.status || "").trim().toLowerCase());
+}
+
+function snapshotHasActiveTasks(snapshot) {
+  return snapshot?.tasks?.length ? snapshot.tasks.some(taskIsActive) : taskIsActive(snapshot);
+}
 
 const state = {
   settings: {},
@@ -23,6 +33,7 @@ const state = {
   plan: null,
   planRecords: [],
   taskState: null,
+  taskStateStale: false,
   sidebarView: "rtdl",
   batches: [],
   nodeStates: {},
@@ -277,8 +288,8 @@ function rememberLastSession(sessionId) {
 /// Reopen the conversation that was last on screen. Only restores one whose
 /// transcript actually survived, so a stale id cannot strand the user in an
 /// empty session that no longer exists.
-function restoreLastSession() {
-  const lastId = localStorage.getItem("robonix.lastSessionId") || "";
+function restoreLastSession(sessionId = "") {
+  const lastId = sessionId || localStorage.getItem("robonix.lastSessionId") || "";
   if (!lastId) return false;
   const conversation = state.history.find((item) => item.id === lastId);
   if (!conversation) return false;
@@ -291,6 +302,10 @@ function restoreLastSession() {
   state.planRecords = conversation.planRecords || [];
   state.batches = conversation.batches || [];
   state.nodeStates = conversation.nodeStates || {};
+  // Last known snapshot, not a live status: a fresh task_state event (from
+  // the next message, or a turn that was still streaming) overwrites it.
+  state.taskState = conversation.taskState || null;
+  state.taskStateStale = Boolean(state.taskState);
   return true;
 }
 
@@ -326,8 +341,10 @@ async function init() {
   // a refresh even when the client was initially launched with --robot-host.
   // An explicitly launched session id wins; otherwise come back to whatever
   // conversation was open before the reload instead of a fresh empty one.
-  if (defaults.sessionId) state.sessionId = defaults.sessionId;
-  else restoreLastSession();
+  if (defaults.sessionId) {
+    state.sessionId = defaults.sessionId;
+    restoreLastSession(defaults.sessionId);
+  } else restoreLastSession();
   if (defaults.sessionTitle) state.sessionTitle = defaults.sessionTitle;
   rememberLastSession(state.sessionId);
   bindSettings();
@@ -925,6 +942,7 @@ function forgetActiveTurn() {
   state.activeTurnId = "";
   state.activePilotSessionId = "";
   state.taskState = null;
+  state.taskStateStale = false;
   state.taskRunning = false;
   state.turnReplied = false;
   state.lastTaskStatusKey = "";
@@ -1095,7 +1113,12 @@ function completeStopState() {
   state.taskRunning = false;
   state.activeTurnId = "";
   state.activePilotSessionId = "";
-  state.taskState = state.taskState ? { ...state.taskState, status: "canceled" } : null;
+  state.taskState = state.taskState ? {
+    ...state.taskState,
+    status: "canceled",
+    tasks: (state.taskState.tasks || []).map(task => taskIsActive(task)
+      ? { ...task, status: "canceled" } : task),
+  } : null;
   const sockets = [...state.interactionSockets];
   state.interactionSockets.clear();
   state.activeStreams = 0;
@@ -1257,12 +1280,11 @@ function handlePilotEvent(event) {
     persistCurrentConversation();
   } else if (event.kind === "task_state" && event.taskState) {
     state.taskState = event.taskState;
+    state.taskStateStale = false;
     const taskStatus = String(event.taskState.status || "").trim().toLowerCase();
-    if (["in_progress", "running", "planning", "executing"].includes(taskStatus)) {
-      state.taskRunning = true;
+    state.taskRunning = snapshotHasActiveTasks(event.taskState);
+    if (state.taskRunning) {
       state.activePilotSessionId = String(event.sessionId || state.activePilotSessionId || "");
-    } else if (["done", "completed", "failed", "cancelled", "canceled", "aborted"].includes(taskStatus)) {
-      state.taskRunning = false;
     }
     setBusy(state.activeStreams > 0 || state.taskRunning);
     addTimeline("status", t(event.taskState.status || event.taskState.goal || "task update"));
@@ -1271,7 +1293,7 @@ function handlePilotEvent(event) {
     if (taskChanged) state.lastTaskStatusKey = taskKey;
     // A finished task can arrive without a final reply; fold the activity run
     // instead of leaving it stuck open until the socket closes.
-    if (["done", "completed", "failed", "cancelled", "canceled", "aborted"].includes(taskStatus)) {
+    if (!state.taskRunning && TASK_TERMINAL.includes(taskStatus)) {
       state.turnReplied = true;
     }
     if (taskChanged) {
@@ -2622,6 +2644,8 @@ async function refreshActivePlans() {
     error: String(error),
   }));
   if (!result.available) {
+    state.executorPlansReady = false;
+    renderGoalPanel();
     renderActivePlans(result.error || t("Executor query unavailable."));
     return;
   }
@@ -2864,6 +2888,7 @@ function currentExecutionContext() {
     }
     return null;
   }
+  if (state.taskStateStale) return null;
   const node = activePlanNode();
   return node ? { source: "Pilot stream estimate", plan: null, op: null, node } : null;
 }
@@ -2886,14 +2911,51 @@ function appendGoalField(root, label, value) {
   root.appendChild(row);
 }
 
+// Shows one row per task once the session has tracked more than one
+// (Pilot's task_state.tasks, added alongside streamed RTDL execution).
+// A single-task session still uses the goal line above instead.
+function renderTaskList() {
+  const list = $("taskList");
+  if (!list) return;
+  const tasks = state.taskState?.tasks || [];
+  if (tasks.length < 2) {
+    list.hidden = true;
+    clear(list);
+    return;
+  }
+  list.hidden = false;
+  const scrollTop = list.scrollTop;
+  clear(list);
+  tasks.forEach((task) => {
+    const statusKey = String(task.status || "").trim().toLowerCase();
+    const row = document.createElement("div");
+    row.className = `task-list-row ${statusKey}`;
+    const dot = document.createElement("span");
+    dot.className = "task-list-dot";
+    const goal = document.createElement("span");
+    goal.className = "task-list-goal";
+    goal.textContent = task.goal || task.taskId || t("task");
+    goal.title = task.goal || "";
+    const status = document.createElement("span");
+    status.className = "task-list-status";
+    status.textContent = t(task.status || "");
+    row.append(dot, goal, status);
+    list.appendChild(row);
+  });
+  list.scrollTop = scrollTop;
+}
+
 function renderGoalPanel() {
+  renderTaskList();
   const task = state.taskState || {};
   const context = currentExecutionContext();
   const active = context?.node || null;
   const taskText = task.goal || task.task || firstUserMessage() || t("waiting for task");
   const status = task.status || (context ? "executing" : "idle");
-  if (maybe("goalLine")) $("goalLine").textContent = t("{status}: {task}", { status: t(status), task: taskText });
+  if (maybe("goalLine")) $("goalLine").textContent = (state.taskStateStale ? t("Last saved state; live Pilot status unavailable.") + " " : "") + t("{status}: {task}", { status: t(status), task: taskText });
   document.querySelectorAll("[data-goal-preview]").forEach((goal) => {
+    const scrollTop = goal.scrollTop;
+    const detailsOpen = Boolean(goal.querySelector("details")?.open);
     clear(goal);
     const card = document.createElement("div");
     card.className = "goal-card";
@@ -2907,40 +2969,48 @@ function renderGoalPanel() {
       || context?.op?.description
       || context?.plan?.description
       || t("No active Executor call");
+    title.title = title.textContent;
     card.append(source, title);
-    if (context) {
+    {
       const fields = document.createElement("div");
       fields.className = "goal-call-grid";
-      const providerId = active?.call?.providerId || context.op?.provider_id || context.op?.providerId || "-";
-      const contractId = active?.call?.contractId || context.op?.contract_id || context.op?.contractId || "-";
+      const providerId = active?.call?.providerId || context?.op?.provider_id || context?.op?.providerId || "-";
+      const contractId = active?.call?.contractId || context?.op?.contract_id || context?.op?.contractId || "-";
       appendGoalField(fields, t("Provider"), providerId);
       appendGoalField(fields, t("Contract"), contractId);
       appendGoalField(
         fields,
         t("Operation"),
-        active?.call?.name || (contractId !== "-" ? contractId.split("/").pop() : "") || context.op?.description || nodeLabel(active || {}),
+        active?.call?.name || (contractId !== "-" ? contractId.split("/").pop() : "") || context?.op?.description || nodeLabel(active || {}),
       );
       appendGoalField(
         fields,
         t("Plan / node"),
-        `${context.plan?.planId || "-"} / ${context.op?.op_id || context.op?.opId || active?.opId || active?.index || "-"}`,
+        `${context?.plan?.planId || "-"} / ${context?.op?.op_id || context?.op?.opId || active?.opId || active?.index || "-"}`,
       );
       card.appendChild(fields);
-    } else {
+    }
+    if (!context) {
       const empty = document.createElement("span");
       empty.textContent = state.executorPlansReady
         ? t("Executor reports no running RTDL plan.")
         : t("Connect to Executor to read the authoritative running call.");
       card.appendChild(empty);
     }
-    const target = goalSummary(active);
-    if (target) {
+    if (context) {
+      const details = document.createElement("details");
+      details.className = "goal-details";
+      details.open = detailsOpen;
+      const summary = document.createElement("summary");
+      summary.textContent = t("View call details");
       const detail = document.createElement("pre");
       detail.className = "goal-json";
-      detail.textContent = target;
-      card.appendChild(detail);
+      detail.textContent = JSON.stringify(active?.call || context.op || context.plan, null, 2);
+      details.append(summary, detail);
+      card.appendChild(details);
     }
     goal.appendChild(card);
+    goal.scrollTop = scrollTop;
   });
 }
 
@@ -2956,7 +3026,7 @@ function goalSummary(node) {
 }
 
 function currentTaskLabel() {
-  const text = firstUserMessage();
+  const text = state.taskState?.goal || firstUserMessage();
   if (!text) return t("idle");
   return text.length > 40 ? `${text.slice(0, 37)}...` : text;
 }
@@ -3217,6 +3287,7 @@ function persistCurrentConversation(titleHint = "", force = false) {
     planRecords: state.planRecords,
     batches: state.batches,
     nodeStates: state.nodeStates,
+    taskState: state.taskState,
   };
 
   // Update in place. Hoisting the current conversation to the front on every
@@ -3394,6 +3465,10 @@ function openConversation(sessionId) {
   state.planRecords = conversation.planRecords || [];
   state.batches = conversation.batches || [];
   state.nodeStates = conversation.nodeStates || {};
+  // forgetActiveTurn() above cleared this; restore the last known snapshot
+  // (a fresh task_state event, if this session is still live, overwrites it).
+  state.taskState = conversation.taskState || null;
+  state.taskStateStale = Boolean(state.taskState);
   state.activeAgentId = null;
   if (maybe("promptTitle")) $("promptTitle").textContent = conversation.title || t("What should Robonix do?");
   renderSessionChip();
