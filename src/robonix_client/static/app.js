@@ -1273,7 +1273,7 @@ function handlePilotEvent(event) {
     updatePlanRecordResult(event.batchResult.planId, (record) => {
       record.batches.unshift(event.batchResult);
       (event.batchResult.results || []).forEach((result) => {
-        if (Number.isFinite(Number(result.nodeIndex))) record.nodeStates[String(result.nodeIndex)] = result;
+        if (Number.isFinite(Number(result.nodeIndex))) saveNodeResult(record, result);
       });
     });
     addTimeline(event.batchResult.anyFailed ? "error" : "result", t("round {round} result", { round: event.batchResult.round }));
@@ -1282,7 +1282,7 @@ function handlePilotEvent(event) {
   } else if (event.kind === "node_state" && event.nodeState) {
     state.nodeStates[String(event.nodeState.nodeIndex)] = event.nodeState;
     updatePlanRecordResult(event.nodeState.planId, (record) => {
-      record.nodeStates[String(event.nodeState.nodeIndex)] = event.nodeState;
+      saveNodeResult(record, event.nodeState);
     });
     addTimeline(event.nodeState.state === "FAILED" ? "error" : "status", `${event.nodeState.opId || t("node {index}", { index: event.nodeState.nodeIndex })} ${t(event.nodeState.state)}`);
     renderPlan();
@@ -1365,6 +1365,20 @@ function upsertPlanRecord(plan) {
   const pending = state.pendingPlanResults.get(id) || [];
   state.pendingPlanResults.delete(id);
   pending.forEach(update => updatePlanRecordResult(id, update));
+}
+
+// Preserve the first returned result's order: verification and batch replay
+// update its status, but do not make an earlier call look newly executed.
+function saveNodeResult(record, result) {
+  const previous = record.nodeStates[String(result.nodeIndex)];
+  const hasOutcome = result.leafResult || ["succeeded", "failed", "canceled", "cancelled", "timeout", "aborted"].includes(String(result.state).toLowerCase());
+  if (previous?.clientResultSequence) {
+    result.clientResultSequence = previous.clientResultSequence;
+  } else if (hasOutcome) {
+    record.resultSequence = Math.max(Number(record.resultSequence || 0), ...Object.values(record.nodeStates).map(item => Number(item.clientResultSequence || 0))) + 1;
+    result.clientResultSequence = record.resultSequence;
+  }
+  record.nodeStates[String(result.nodeIndex)] = result;
 }
 
 function updatePlanRecordResult(planId, update) {
@@ -3114,93 +3128,74 @@ function executionSummaries() {
     return ["failed", "canceled", "cancelled", "aborted", "timeout"].includes(status) ? status : null;
   };
   const key = context => `${context.plan.planId}/${context.node?.opId || context.op?.op_id || context.op?.opId || context.node?.call?.callId}`;
-  const observed = [];
-  if (state.executorPlansReady) {
-    for (const plan of state.executorPlans.filter(plan => ids.has(String(plan.planId)))) {
-      const record = records.find(record => String(record.plan.planId) === String(plan.planId));
-      for (const op of plan.ops || []) {
-        const node = executorNodeForOp(record, op);
-        const isCall = node ? Boolean(node.call) : op.kind === "do" || (!op.kind && Boolean(op.provider_id || op.contract_id || op.providerId || op.contractId));
-        if (!isCall) continue;
-        const label = String(op.state).toLowerCase() === "running" ? "Executing now" : terminal(op.state);
-        if (label) observed.push({context:{plan, op, node, source:"Executor verified"}, label});
-      }
-    }
-  } else if (!state.taskStateStale) {
-    for (const record of records) {
-      const maps = buildResultMaps(record);
-      for (const node of planCalls(record.plan)) {
-        const result = resultForNode(node, maps);
-        if (String(result?.state).toLowerCase() === "running") {
-          observed.push({context:{plan:record.plan, node, op:null, source:"Pilot stream estimate"}, label:"Executing now"});
-        }
-      }
-    }
-  }
-  let retained = (state.lastExecutionByTask.get(task.taskId) || []).filter(item => ids.has(String(item.context.plan.planId)));
-  const running = observed.filter(item => item.label === "Executing now");
-  if (running.length) {
-    // Keep completed siblings while a parallel group winds down; a new group
-    // replaces the old one once none of its running calls overlap.
-    const overlaps = running.some(item => retained.some(old => key(old.context) === key(item.context)));
-    if (!overlaps) retained = [];
-    for (const item of observed.filter(item => item.label === "Executing now" || retained.some(old => key(old.context) === key(item.context)))) {
-      const index = retained.findIndex(old => key(old.context) === key(item.context));
-      if (index < 0) retained.push(item); else retained[index] = item;
-    }
-  } else {
-    // Fast calls can finish between Executor polls. Their saved terminal
-    // results must advance the summary even if we never observed them running.
-    const retainedIndex = Math.min(...retained.map(item => {
-      const index = records.findIndex(record => String(record.plan.planId) === String(item.context.plan.planId));
-      return index < 0 ? Infinity : index;
-    }));
-    for (const [index, record] of records.entries()) {
-      if (index > retainedIndex) break;
-      const maps = buildResultMaps(record);
-      const finished = planCalls(record.plan).filter(node => {
-        const result = resultForNode(node, maps);
-        return terminal(result?.state) || result?.leafResult;
-      });
-      const observedFinished = observed.filter(item => String(item.context.plan.planId) === String(record.plan.planId));
-      if (!finished.length && !observedFinished.length) continue;
-      if (index < retainedIndex) retained = [];
-      for (const item of observedFinished) {
-        const existing = retained.findIndex(old => key(old.context) === key(item.context));
-        if (existing < 0) retained.push(item); else retained[existing] = item;
-      }
-      for (const node of finished) {
-        const context = {plan:record.plan, node, op:null, source:"Saved execution record"};
-        if (!retained.some(item => key(item.context) === key(context))) {
-          retained.push({context, label:"Live status unconfirmed"});
-        }
-      }
-      break;
-    }
-    if (!retained.length && observed.length) retained = observed;
-  }
-  if (!retained.length) {
-    for (const record of records) {
-      const maps = buildResultMaps(record);
-      retained = planCalls(record.plan).filter(node => resultForNode(node, maps)).map(node => ({
-        context:{plan:record.plan, node, op:null, source:"Saved execution record"}, label:"Live status unconfirmed",
-      }));
-      if (retained.length) break;
-    }
-  }
-  retained = retained.map(item => {
-    const fresh = observed.find(value => key(value.context) === key(item.context));
-    if (fresh) return fresh;
-    const record = records.find(record => String(record.plan.planId) === String(item.context.plan.planId));
-    const node = record && (item.context.op ? executorNodeForOp(record, item.context.op) : record.plan.nodes.find(node => node.opId === item.context.node?.opId));
-    const context = {...item.context, node:node || item.context.node};
-    const result = record && context.node ? resultForNode(context.node, buildResultMaps(record)) : null;
-    const label = terminal(result?.state) || (result?.leafResult ? (result.leafResult.success ? "completed" : "failed") : null)
-      || terminal(item.label) || "Live status unconfirmed";
-    return {context, label};
+  const active = new Map();
+  (state.executorPlansReady ? state.executorPlans : []).filter(plan => ids.has(String(plan.planId))).forEach(plan => {
+    (plan.ops || []).forEach(op => active.set(`${plan.planId}/${op.op_id || op.opId}`, { plan, op }));
   });
-  state.lastExecutionByTask.set(task.taskId, retained);
-  return retained;
+
+  // Keep one complete call group for the newest owned RTDL. Polling only
+  // updates these calls; a newer plan record is what replaces the group.
+  const record = records[0] || null;
+  const previous = state.lastExecutionByTask.get(task.taskId) || [];
+  const maps = record ? buildResultMaps(record) : null;
+  const summaries = (record ? planCalls(record.plan) : []).map(node => {
+    const activeCall = active.get(`${record.plan.planId}/${node.opId}`);
+    const result = resultForNode(node, maps);
+    const liveState = String(activeCall?.op?.state || "").toLowerCase();
+    const savedState = String(result?.state || "").toLowerCase();
+    const retained = previous.find(item => item.context.record?.key === record.key && key(item.context) === `${record.plan.planId}/${node.opId}`);
+    const observed = retained && retained.label !== "pending";
+    const label = terminal(savedState) || terminal(liveState) || terminal(retained?.label)
+      || (["verifying", "paused"].includes(liveState) ? liveState : null)
+      || (["verifying", "paused"].includes(savedState) ? savedState : null)
+      || (String(liveState || "").toLowerCase() === "running"
+        || (!state.executorPlansReady && !state.taskStateStale && savedState === "running") ? "Executing now" : null)
+      || (result?.leafResult ? (result.leafResult.success ? "completed" : "failed") : null)
+      || (liveState ? String(liveState).toLowerCase() : null)
+      || (savedState === "running" || observed || record.batches?.length ? "Live status unconfirmed" : "pending");
+    return {
+      context: {
+        plan: record.plan,
+        node,
+        op: activeCall?.op || retained?.context.op || null,
+        record,
+        source: activeCall ? "Executor verified" : "Saved execution record",
+      },
+      label,
+    };
+  });
+
+  // Until a tree arrives, retain concrete Executor calls without guessing children.
+  if (!record) {
+    for (const { plan, op } of active.values()) {
+      if (!ids.has(String(plan.planId)) || op.kind !== "do") continue;
+      summaries.push({
+        context: { plan, op, node: null, record: null, source: "Executor verified" },
+        label: String(op.state || "").toLowerCase() === "running" ? "Executing now" : terminal(op.state) || String(op.state || "pending").toLowerCase(),
+      });
+    }
+  }
+
+  if (!record && !summaries.length) {
+    summaries.push(...previous.filter(item => ids.has(String(item.context.plan.planId))).map(item => ({
+      ...item, label: terminal(item.label) || "Live status unconfirmed",
+    })));
+  }
+
+  summaries.sort((left, right) => {
+    const leftRunning = left.label === "Executing now" ? 1 : 0;
+    const rightRunning = right.label === "Executing now" ? 1 : 0;
+    if (leftRunning !== rightRunning) return rightRunning - leftRunning;
+    const sequence = item => {
+      const result = maps && item.context.node
+        ? resultForNode(item.context.node, maps)
+        : null;
+      return Number(result?.clientResultSequence || 0);
+    };
+    return sequence(right) - sequence(left);
+  });
+  state.lastExecutionByTask.set(task.taskId, summaries);
+  return summaries;
 }
 
 function renderGoalPanel() {

@@ -198,7 +198,7 @@ test('legacy cleanup removes old snapshots once and retains current records', as
 test('Executor metadata prefers authoritative active-plan fields', async ({page}) => {
   await ownershipFixture(page);
   await page.evaluate(() => {
-    state.executorPlans = [{planId:'plan-a',ops:[{op_id:'composite-op',description:'parallel query',provider_id:'tiago_camera',contract_id:'robonix/primitive/camera/snapshot',state:'running'}]}];
+    state.executorPlans = [{planId:'plan-a',ops:[{op_id:'plan-a',description:'camera query',provider_id:'tiago_camera',contract_id:'robonix/primitive/camera/snapshot',state:'running'}]}];
     state.executorPlanIds = new Set(['plan-a']);
     renderGoalPanel();
   });
@@ -356,8 +356,8 @@ test('parallel calls retain individual results without mixing tasks or changing 
     state.executorPlans[0].ops[1].state = 'succeeded';
     renderGoalPanel();
   });
-  await expect(cards.nth(0).locator('.execution-summary-status')).toHaveText('completed');
-  await expect(cards.nth(1).locator('.execution-summary-status')).toHaveText('Executing now');
+  await expect(cards.nth(0).locator('.execution-summary-status')).toHaveText('Executing now');
+  await expect(cards.nth(1).locator('.execution-summary-status')).toHaveText('completed');
   await page.evaluate(() => {
     updatePlanRecordResult('plan-a', record => {
       record.nodeStates = {'1':{nodeIndex:1,state:'SUCCEEDED'},'2':{nodeIndex:2,state:'CANCELED'}};
@@ -369,7 +369,7 @@ test('parallel calls retain individual results without mixing tasks or changing 
     persistCurrentConversation();
     rememberLastSession(state.sessionId);
   });
-  await expect(cards.nth(1).locator('.execution-summary-status')).toHaveText('canceled');
+  await expect(cards.filter({hasText:'base-provider'}).locator('.execution-summary-status')).toHaveText('canceled');
   await page.locator('[data-task-id="C"]').click();
   await expect(page.locator('.goal-preview')).not.toContainText('camera-provider');
   await page.locator('[data-task-id="A"]').click();
@@ -378,32 +378,62 @@ test('parallel calls retain individual results without mixing tasks or changing 
   await page.reload();
   await expect(cards).toHaveCount(2);
   await expect(cards.nth(0).locator('.execution-summary-status')).toHaveText('completed');
-  await expect(cards.nth(1).locator('.execution-summary-status')).toHaveText('canceled');
+  await expect(cards.filter({hasText:'base-provider'}).locator('.execution-summary-status')).toHaveText('canceled');
   await page.locator('.current-goal-panel').scrollIntoViewIfNeeded();
   await page.screenshot({path:test.info().outputPath('executor-parallel.png')});
 });
 
-test('composite status never impersonates pending children; unknown calls stay unconfirmed', async ({page}) => {
+test('current RTDL keeps pending children without borrowing composite or unmapped status', async ({page}) => {
   await parallelCallsFixture(page);
   await page.evaluate(() => {
     state.lastExecutionByTask.clear();
     state.executorPlans[0].ops.slice(1).forEach(op => op.state = 'pending');
     renderGoalPanel();
   });
-  await expect(page.locator('.goal-preview')).toContainText('waiting for call information');
-  await expect(page.locator('.goal-preview .goal-call-grid')).toHaveCount(0);
+  await expect(page.locator('.execution-summary-status')).toHaveText(['pending', 'pending']);
+  await expect(page.locator('.goal-preview .goal-call-grid')).toHaveCount(2);
   await page.evaluate(() => {
     state.executorPlans[0].ops.push({op_id:'tree-not-arrived',kind:'do',state:'running',description:'unmapped call'});
     renderGoalPanel();
   });
-  await expect(page.locator('.goal-preview')).toContainText('Not provided');
-  await expect(page.locator('.goal-preview')).not.toContainText('camera-provider');
+  await expect(page.locator('.goal-preview')).not.toContainText('unmapped call');
+  await expect(page.locator('.goal-preview')).toContainText('camera-provider');
   await page.evaluate(() => {
     state.executorPlans = [];
     updatePlanRecordResult('plan-a', record => record.batches = [{anyFailed:false,results:[]}]);
     renderGoalPanel();
   });
-  await expect(page.locator('.execution-summary-status')).toHaveText('Live status unconfirmed');
+  await expect(page.locator('.execution-summary-status')).toHaveText(['Live status unconfirmed', 'Live status unconfirmed']);
+});
+
+test('only a new owned RTDL replaces the complete Executor group', async ({page}) => {
+  await parallelCallsFixture(page);
+  await page.evaluate(() => {
+    state.executorPlans = [];
+    renderGoalPanel();
+  });
+  await expect(page.locator('.goal-preview .goal-card > strong')).toHaveText(['snapshot', 'navigate']);
+  await page.evaluate(() => {
+    upsertPlanRecord({planId:'foreign-new', round:2, nodes:[{index:0,opId:'foreign',call:{name:'foreign'}}]});
+    renderGoalPanel();
+  });
+  await expect(page.locator('.goal-preview .goal-card > strong')).toHaveText(['snapshot', 'navigate']);
+  await page.evaluate(() => {
+    state.taskState.tasks.find(task => task.taskId === 'A').planIds.push('next');
+    upsertPlanRecord({planId:'next',round:2,nodes:[{index:0,opId:'next',call:{name:'new call'}}]});
+    renderGoalPanel();
+  });
+  await expect(page.locator('.goal-preview .goal-card > strong')).toHaveText(['new call']);
+  await expect(page.locator('.execution-summary-status')).toHaveText('pending');
+  await page.evaluate(() => {
+    updatePlanRecordResult('plan-a', record => {record.nodeStates['1']={nodeIndex:1,state:'SUCCEEDED'};});
+    renderGoalPanel();
+    rememberLastSession(state.sessionId);
+    persistCurrentConversation();
+  });
+  await expect(page.locator('.goal-preview .goal-card > strong')).toHaveText(['new call']);
+  await page.reload();
+  await expect(page.locator('.goal-preview .goal-card > strong')).toHaveText(['new call']);
 });
 
 
@@ -508,6 +538,30 @@ test('completed calls advance the summary without an observed running poll', asy
   await expect(page.locator('.execution-summary-status')).toHaveText('completed');
 });
 
+test('Executor orders returned calls and preserves order through verification, batch and reload', async ({page}) => {
+  await parallelCallsFixture(page);
+  await page.evaluate(() => {
+    state.executorPlans = [];
+    state.executorPlanIds = new Set();
+    const emit = (nodeIndex, opId, callId, status) => handlePilotEvent({kind:'node_state',nodeState:{planId:'plan-a',nodeIndex,opId,state:status,leafResult:{callId,success:true}}});
+    emit(2,'nav','nav-call','VERIFYING');
+    emit(1,'camera','camera-call','SUCCEEDED');
+    emit(2,'nav','nav-call','SUCCEEDED');
+  });
+  const titles = page.locator('.goal-preview .goal-card > strong');
+  await expect(titles).toHaveText(['snapshot','navigate']);
+  await page.evaluate(() => {
+    handlePilotEvent({kind:'batch_result',batchResult:{planId:'plan-a',round:1,anyFailed:false,results:[
+      {nodeIndex:1,opId:'camera',state:'SUCCEEDED',leafResult:{callId:'camera-call',success:true}},
+      {nodeIndex:2,opId:'nav',state:'SUCCEEDED',leafResult:{callId:'nav-call',success:true}},
+    ]}});
+    rememberLastSession(state.sessionId);
+  });
+  await expect(titles).toHaveText(['snapshot','navigate']);
+  await page.reload();
+  await expect(titles).toHaveText(['snapshot','navigate']);
+});
+
 test('canceled plans are not labeled completed when anyFailed is false', async ({page}) => {
   await parallelCallsFixture(page);
   await page.evaluate(() => {
@@ -539,4 +593,54 @@ test('Escape closes call details before the underlying plan overview', async ({p
   await expect(page.locator('#activeRtdlModal')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.locator('#activeRtdlModal')).not.toBeVisible();
+});
+
+
+test('Executor retains metadata and respects terminal and verification states over stale polls', async ({page}) => {
+  await parallelCallsFixture(page);
+  await page.evaluate(() => {
+    state.executorPlans[0].ops[1].provider_id = 'resolved-camera';
+    handlePilotEvent({kind:'node_state',nodeState:{planId:'plan-a',nodeIndex:1,state:'VERIFYING',leafResult:{success:true}}});
+  });
+  const camera = page.locator('.goal-preview .goal-card').filter({hasText:'snapshot'});
+  await expect(camera.locator('.execution-summary-status')).toHaveText('verifying');
+  await page.evaluate(() => {
+    handlePilotEvent({kind:'node_state',nodeState:{planId:'plan-a',nodeIndex:1,state:'CANCELED'}});
+    state.executorPlans = [];
+    renderGoalPanel();
+  });
+  await expect(camera.locator('.execution-summary-status')).toHaveText('canceled');
+  await expect(camera).toContainText('resolved-camera');
+  await page.evaluate(() => {
+    state.executorPlansReady = false;
+    state.taskStateStale = true;
+    state.executorPlans = [{planId:'plan-a',ops:[{op_id:'nav',kind:'do',state:'running'}]}];
+    renderGoalPanel();
+  });
+  await expect(page.locator('.goal-preview .goal-card').filter({hasText:'navigate'}).locator('.execution-summary-status')).toHaveText('Live status unconfirmed');
+});
+
+
+test('Executor preserves polled outcomes and does not finish calls still being verified', async ({page}) => {
+  await parallelCallsFixture(page);
+  const camera = page.locator('.goal-preview .goal-card').filter({hasText:'snapshot'});
+  await page.evaluate(() => {
+    const record = state.planRecords.find(item => item.plan.planId === 'plan-a');
+    record.nodeStates['1'] = {nodeIndex:1,state:'RUNNING',leafResult:{success:true}};
+    state.executorPlans[0].ops[1].state = 'verifying';
+    renderGoalPanel();
+  });
+  await expect(camera.locator('.execution-summary-status')).toHaveText('verifying');
+  await page.evaluate(() => {
+    state.executorPlans[0].ops[1].state = 'failed';
+    renderGoalPanel();
+    state.executorPlans = [];
+    renderGoalPanel();
+  });
+  await expect(camera.locator('.execution-summary-status')).toHaveText('failed');
+  await page.evaluate(() => {
+    selectTask('C');
+    selectTask('A');
+  });
+  await expect(camera.locator('.execution-summary-status')).toHaveText('failed');
 });
