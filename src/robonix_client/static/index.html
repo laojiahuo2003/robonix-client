@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Robonix Client</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20261025z" />
+    <link rel="stylesheet" href="/static/styles.css?v=20261030b" />
   </head>
   <body>
     <div class="app-shell">
@@ -811,11 +811,17 @@
           <button class="icon-button modal-close" id="closeActiveRtdl" type="button" aria-label="Close active RTDL" data-i18n-aria-label="Close active RTDL">×</button>
         </header>
         <div class="active-rtdl-modal-body">
-          <h3 data-i18n="Robot-wide active plans">Robot-wide active plans</h3>
-          <div id="activeRtdlList" aria-live="polite"></div>
-          <h3 data-i18n="Saved plans for all tasks in this conversation">Saved plans for all tasks in this conversation</h3>
-          <p data-i18n="Saved locally; not a robot-wide execution history.">Saved locally; not a robot-wide execution history.</p>
-          <div id="savedRtdlList"></div>
+          <section class="overview-section">
+            <h3 class="overview-section-title" data-i18n="Robot-wide active plans">Robot-wide active plans</h3>
+            <div id="activeRtdlList" aria-live="polite"></div>
+          </section>
+          <section class="overview-section">
+            <div class="overview-section-head">
+              <h3 class="overview-section-title" data-i18n="Saved plans for all tasks in this conversation">Saved plans for all tasks in this conversation</h3>
+              <p class="overview-section-note" data-i18n="Saved locally; not a robot-wide execution history.">Saved locally; not a robot-wide execution history.</p>
+            </div>
+            <div id="savedRtdlList"></div>
+          </section>
         </div>
       </section>
     </div>
@@ -872,8 +878,8 @@
       </section>
     </div>
 
-    <script src="/static/i18n.js?v=20261025y"></script>
-    <script src="/static/app.js?v=20261025zd"></script>
+    <script src="/static/i18n.js?v=20261030b"></script>
+    <script src="/static/app.js?v=20261030b"></script>
     <script src="/static/vitals.bundle.js?v=20261018f"></script>
   </body>
 </html>

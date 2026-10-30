@@ -209,15 +209,10 @@ function loadConversations() {
   try {
     const raw = JSON.parse(localStorage.getItem("robonix.conversations") || "[]");
     let conversations = Array.isArray(raw) ? raw.filter(c => hasConversationContent(c)) : [];
-    // Remove pre-task-ownership snapshots once; new conversations may still be awaiting their first event.
+    // One-time migration: preserve conversations without taskState (legacy sessions)
+    // and conversations still awaiting their first task_state event.
     if (localStorage.getItem("robonix.taskOwnershipCleanup") !== "1") {
-      conversations = conversations.filter(c => Array.isArray(c.taskState?.tasks)
-        && c.taskState.tasks.every(task => Array.isArray(task.planIds)));
-      localStorage.setItem("robonix.conversations", JSON.stringify(conversations));
       localStorage.removeItem("robonix.history");
-      if (!conversations.some(c => c.id === localStorage.getItem("robonix.lastSessionId"))) {
-        localStorage.removeItem("robonix.lastSessionId");
-      }
       localStorage.setItem("robonix.taskOwnershipCleanup", "1");
     }
     return conversations;
@@ -2009,10 +2004,6 @@ function addTimeline(kind, text) {
 
 function renderTimeline() {
   setTextAll("[data-event-summary]", String(state.timeline.length));
-  setTextAll("[data-current-task-label]", t("Current Task: {task}", { task: currentTaskLabel() }));
-  document.querySelectorAll("[data-task-status-chip]").forEach((chip) => {
-    chip.classList.toggle("running", Boolean(state.taskRunning));
-  });
   const rows = state.timeline;
   document.querySelectorAll("[data-event-list]").forEach((root) => {
     clear(root);
@@ -2038,13 +2029,29 @@ function selectedTask() {
   return pinned || tasks.find(task => task.taskId === state.taskState?.taskId) || tasks.at(-1) || null;
 }
 
+/// Plan ids that belong to the current scope. Without task ownership
+/// information (legacy sessions, Pilot builds that send only goal/status, or
+/// before the first task_state event) every plan this conversation holds a
+/// tree for counts as owned, so the tree, Executor card and call context
+/// agree; Executor plans from other clients still stay out.
 function taskPlanIds() {
-  return new Set((selectedTask()?.planIds || []).map(String));
+  if (state.taskState?.tasks?.length) return new Set((selectedTask()?.planIds || []).map(String));
+  return new Set(normalizedPlanRecords().map(record => String(record.plan.planId)));
 }
 
 function scopedPlanRecords() {
   const ids = taskPlanIds();
   return normalizedPlanRecords().filter(record => ids.has(String(record.plan.planId)));
+}
+
+/// The record the execution tree shows; the Executor card follows the same one.
+function displayPlanRecord(records = scopedPlanRecords()) {
+  const contextPlanId = currentExecutionContext()?.plan?.planId;
+  // Keep the running plan if there is one; otherwise keep the most recent
+  // completed plan so the execution tree does not flash and vanish on the
+  // next executor poll.
+  if (contextPlanId) return records.find(record => String(record.plan.planId) === String(contextPlanId)) || null;
+  return records.find(record => recordIsActive(record)) || records[0] || null;
 }
 
 function selectTask(taskId = "") {
@@ -2073,14 +2080,7 @@ function renderPlan() {
   treeLiveKeys = new Set();
   const records = scopedPlanRecords();
   const contextPlanId = currentExecutionContext()?.plan?.planId;
-  const activeRecords = records.filter((record) => recordIsActive(record));
-  const latestActiveRecord = activeRecords[0] || null;
-  // Keep the running plan if there is one; otherwise keep the most recent
-  // completed plan so the execution tree does not flash and vanish on the
-  // next executor poll.
-  const displayRecord = contextPlanId
-    ? records.find(record => String(record.plan.planId) === String(contextPlanId)) || null
-    : latestActiveRecord || records[0] || null;
+  const displayRecord = displayPlanRecord(records);
   const historyRecords = records.filter((record) => record !== displayRecord);
 
   if (maybe("rtdlHistoryCount")) $("rtdlHistoryCount").textContent = String(historyRecords.length);
@@ -2099,7 +2099,11 @@ function renderPlan() {
     roots.forEach((root) => renderPlanRecord(root, displayRecord, showNodeDetail));
   }
   renderPlanHistory(historyRecords);
-  renderSavedPlans();
+  // Only render the saved-plans modal when it is open to avoid rebuilding
+  // the entire DOM tree every 2 seconds (triggered by refreshActivePlans).
+  if (maybe("activeRtdlModal")?.hidden === false) {
+    renderSavedPlans();
+  }
   pruneTreeObservers();
   const newest = displayRecord;
   // While the node-detail popup is open, keep showing the node the user clicked
@@ -2119,22 +2123,26 @@ function normalizedPlanRecords() {
   return [{ key: planRecordKey(state.plan), plan: state.plan, nodeStates: state.nodeStates || {}, batches: state.batches || [] }];
 }
 
+function planRecordStatus(record, maps = buildResultMaps(record)) {
+  const rootNode = record.plan.nodes.find(node => Number(node.index) === Number(record.plan.rootIndex ?? 0));
+  const rootState = String(resultForNode(rootNode, maps)?.state || "").toLowerCase();
+  const results = [...maps.byIndex.values()];
+  const canceled = value => ["canceled", "cancelled", "aborted"].includes(String(value || "").toLowerCase());
+  return record.batches?.length
+    ? canceled(rootState) ? "canceled"
+      : record.batches.some(batch => batch.anyFailed) ? "failed"
+      : results.some(result => canceled(result.state)) ? "canceled"
+      : results.some(result => statusKey(result.state) === "failed") ? "failed" : "completed"
+    : recordIsActive(record) ? "running" : "Live status unconfirmed";
+}
+
 function renderPlanRecord(root, record, onSelect = renderExecutionDetail) {
   const wrapper = document.createElement("section");
   wrapper.className = "plan-record";
   const label = document.createElement("div");
   label.className = "plan-record-label";
   const maps = buildResultMaps(record);
-  const rootNode = record.plan.nodes.find(node => Number(node.index) === Number(record.plan.rootIndex ?? 0));
-  const rootState = String(resultForNode(rootNode, maps)?.state || "").toLowerCase();
-  const results = [...maps.byIndex.values()];
-  const canceled = value => ["canceled", "cancelled", "aborted"].includes(String(value || "").toLowerCase());
-  const planStatus = record.batches?.length
-    ? canceled(rootState) ? "canceled"
-      : record.batches.some(batch => batch.anyFailed) ? "failed"
-      : results.some(result => canceled(result.state)) ? "canceled"
-      : results.some(result => statusKey(result.state) === "failed") ? "failed" : "completed"
-    : recordIsActive(record) ? "running" : "Live status unconfirmed";
+  const planStatus = planRecordStatus(record, maps);
   label.textContent = t("Plan {id} · round {round} · {calls} call(s)", { id: record.plan.planId || "-", round: record.plan.round, calls: planCalls(record.plan).length }) + " · " + t(planStatus);
   wrapper.appendChild(label);
   const runningIndex = recordIsActive(record)
@@ -2708,6 +2716,10 @@ async function refreshActivePlans() {
     renderActivePlans(t("Set Robot Host first."));
     return;
   }
+  // A failed query can take longer than the 2 s poll interval (gRPC retries a
+  // refused connection until its deadline), so never stack requests.
+  if (state.activePlansInFlight) return;
+  state.activePlansInFlight = true;
   const settings = { ...collectSettings(), atlasEndpoint: atlas };
   const result = await fetch("/api/executor/active-plans", {
     method: "POST",
@@ -2717,12 +2729,19 @@ async function refreshActivePlans() {
     available: false,
     count: 0,
     plans: [],
+    reason: "client_unreachable",
     error: String(error),
-  }));
+  })).finally(() => {
+    state.activePlansInFlight = false;
+  });
   if (!result.available) {
     state.executorPlansReady = false;
     renderGoalPanel();
-    renderActivePlans(result.error || t("Executor query unavailable."));
+    renderActivePlans({
+      reason: result.reason || "unknown",
+      endpoint: result.endpoint || atlas,
+      detail: result.error || t("Executor query unavailable."),
+    });
     return;
   }
   state.executorPlansReady = true;
@@ -2742,54 +2761,119 @@ async function refreshActivePlans() {
   }
 }
 
+function savedPlanStatusPill(status) {
+  const pill = document.createElement("span");
+  pill.className = `saved-plan-status status ${status === "Live status unconfirmed" ? "pending" : statusKey(status)}`;
+  pill.textContent = t(status);
+  return pill;
+}
+
+function savedPlanRecord(record, groupKey, opened) {
+  const details = document.createElement("details");
+  details.className = "saved-plan-record";
+  details.dataset.recordKey = `${groupKey}/${record.key || planRecordKey(record.plan)}`;
+  details.open = opened.has(details.dataset.recordKey);
+  const maps = buildResultMaps(record);
+  const summary = document.createElement("summary");
+  const label = document.createElement("span");
+  label.className = "saved-plan-label";
+  label.textContent = t("Plan {id} · round {round} · {calls} call(s)", {id:record.plan.planId, round:record.plan.round, calls:planCalls(record.plan).length});
+  summary.append(label, savedPlanStatusPill(planRecordStatus(record, maps)));
+  details.appendChild(summary);
+  const nodes = document.createElement("div");
+  nodes.className = "saved-plan-nodes";
+  for (const node of record.plan.nodes) {
+    const row = document.createElement("div");
+    row.className = "saved-plan-node";
+    const text = document.createElement("span");
+    text.className = "saved-plan-node-name";
+    text.textContent = node.description || node.call?.name || node.opId || node.kind;
+    text.title = text.textContent;
+    const nodeState = resultForNode(node, maps)?.state;
+    row.append(text, savedPlanStatusPill(nodeState ? String(nodeState).toLowerCase() : "Live status unconfirmed"));
+    if (node.call) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "call-detail-trigger";
+      button.setAttribute("aria-haspopup", "dialog");
+      button.textContent = t("View call details");
+      // The row can outlive a re-render that found nothing changed, so read
+      // the current record when clicked instead of the one captured here.
+      const recordKey = record.key || planRecordKey(record.plan);
+      button.onclick = () => {
+        const current = normalizedPlanRecords().find(item => (item.key || planRecordKey(item.plan)) === recordKey) || record;
+        const currentNode = current.plan.nodes.find(item => Number(item.index) === Number(node.index)) || node;
+        showCallDetails({plan:current.plan, node:currentNode, op:null, record:current, source:"Saved execution record"});
+      };
+      row.appendChild(button);
+    }
+    nodes.appendChild(row);
+  }
+  details.appendChild(nodes);
+  return details;
+}
+
+function savedPlanGroup(title, records, groupKey, opened, emptyText) {
+  const group = document.createElement("section");
+  group.className = "saved-plan-task";
+  const heading = document.createElement("h4");
+  heading.textContent = title;
+  heading.title = title;
+  group.appendChild(heading);
+  if (!records.length) {
+    const empty = document.createElement("p");
+    empty.className = "saved-plan-empty";
+    empty.textContent = emptyText;
+    group.appendChild(empty);
+  }
+  records.forEach(record => group.appendChild(savedPlanRecord(record, groupKey, opened)));
+  return group;
+}
+
 function renderSavedPlans() {
   const root = maybe("savedRtdlList");
   if (!root) return;
   const opened = new Set([...root.querySelectorAll("details[open]")].map(el => el.dataset.recordKey));
-  clear(root);
+  const children = [];
   const records = normalizedPlanRecords();
   const tasks = [...(state.taskState?.tasks || [])].reverse();
   for (const task of tasks) {
     const ids = new Set((task.planIds || []).map(String));
-    const group = document.createElement("section");
-    group.className = "saved-plan-task";
-    const title = document.createElement("h3");
-    title.textContent = task.goal || task.taskId;
-    group.appendChild(title);
     const owned = records.filter(record => ids.has(String(record.plan.planId)));
-    if (!owned.length) {
-      const empty = document.createElement("p");
-      empty.textContent = t(ids.size ? "Plan ownership is known; tree details have not been received or are no longer saved." : "This task has not produced an RTDL plan.");
-      group.appendChild(empty);
-    }
-    for (const record of owned) {
-      const details = document.createElement("details");
-      details.dataset.recordKey = `${task.taskId}/${record.key || planRecordKey(record.plan)}`;
-      details.open = opened.has(details.dataset.recordKey);
-      const summary = document.createElement("summary");
-      summary.textContent = t("Plan {id} · round {round} · {calls} call(s)", {id:record.plan.planId, round:record.plan.round, calls:planCalls(record.plan).length});
-      details.appendChild(summary);
-      const maps = buildResultMaps(record);
-      for (const node of record.plan.nodes) {
-        const row = document.createElement("div");
-        row.className = "saved-plan-node";
-        const text = document.createElement("span");
-        text.textContent = `${node.description || node.call?.name || node.opId || node.kind} · ${t(resultForNode(node, maps)?.state || "Live status unconfirmed")}`;
-        row.appendChild(text);
-        if (node.call) {
-          const button = document.createElement("button");
-          button.type = "button";
-          button.textContent = t("View call details");
-          button.onclick = () => showCallDetails({plan:record.plan, node, op:null, record, source:"Saved execution record"});
-          row.appendChild(button);
-        }
-        details.appendChild(row);
-      }
-      group.appendChild(details);
-    }
-    root.appendChild(group);
+    children.push(savedPlanGroup(
+      task.goal || task.taskId,
+      owned,
+      task.taskId,
+      opened,
+      t(ids.size ? "Plan ownership is known; tree details have not been received or are no longer saved." : "This task has not produced an RTDL plan."),
+    ));
   }
-  if (!tasks.length) root.textContent = t("No saved task plans in this conversation.");
+  // Sessions saved before task ownership existed (or Pilot builds that do not
+  // send it) still have plan records; list them instead of hiding them.
+  if (!tasks.length && records.length) {
+    children.push(savedPlanGroup(t("Plans without task information"), records, "untasked", opened, ""));
+  }
+  if (!children.length) {
+    const empty = document.createElement("div");
+    empty.className = "active-rtdl-empty";
+    empty.textContent = t("No saved task plans in this conversation.");
+    children.push(empty);
+  }
+  // The Executor poll re-renders every 2 s while the overview is open.
+  const body = root.closest(".active-rtdl-modal-body");
+  const scrollTop = body?.scrollTop || 0;
+  if (replaceChildrenIfChanged(root, children) && body) body.scrollTop = scrollTop;
+}
+
+/// Rebuild `root` only when its markup would change, so a poll that brings
+/// nothing new keeps the existing nodes, and a click landing between polls
+/// still reaches its button.
+function replaceChildrenIfChanged(root, children) {
+  const next = document.createElement(root.tagName);
+  next.append(...children);
+  if (next.innerHTML === root.innerHTML) return false;
+  root.replaceChildren(...next.childNodes);
+  return true;
 }
 
 function renderActivePlans(error = "") {
@@ -2803,10 +2887,7 @@ function renderActivePlans(error = "") {
   if (error) {
     count.textContent = t("unavailable");
     if (modalSummary) modalSummary.textContent = t("Live Executor query failed");
-    const row = document.createElement("div");
-    row.className = "active-rtdl-empty error";
-    row.textContent = error;
-    root.appendChild(row);
+    root.appendChild(executorErrorNotice(error));
     return;
   }
   const planCount = state.executorPlans.length;
@@ -2875,6 +2956,46 @@ function renderActivePlans(error = "") {
     card.appendChild(ops);
     root.appendChild(card);
   });
+}
+
+const EXECUTOR_ERROR_TEXT = {
+  atlas_unreachable: ["Cannot reach Atlas at {endpoint}.", "Check that Robonix is running on the robot (rbnx boot) and that Robot Host and the Atlas port are correct."],
+  executor_not_registered: ["Atlas at {endpoint} has no Executor registered.", "Robonix is up but Executor has not started or has not registered its active-plan query yet."],
+  executor_unreachable: ["Executor at {endpoint} is not responding.", "Executor is registered in Atlas but did not answer; it may be stopped or overloaded."],
+  executor_error: ["Executor at {endpoint} rejected the query.", ""],
+  client_unreachable: ["The local Robonix client server is not responding.", "Restart robonix-client and reload this page."],
+};
+
+// Explain which hop of the Executor query failed; the raw gRPC text stays
+// available in a collapsed block for bug reports.
+function executorErrorNotice(error) {
+  const info = typeof error === "string" ? { reason: "", detail: error } : error;
+  const [headline, hint] = EXECUTOR_ERROR_TEXT[info.reason] || [];
+  const box = document.createElement("div");
+  box.className = "active-rtdl-empty error";
+  box.setAttribute("role", "status");
+  const title = document.createElement("strong");
+  title.textContent = headline ? t(headline, { endpoint: info.endpoint || "-" }) : info.detail;
+  box.appendChild(title);
+  if (hint) {
+    const help = document.createElement("p");
+    help.textContent = t(hint);
+    box.appendChild(help);
+  }
+  if (headline && info.detail) {
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    summary.textContent = t("Technical details");
+    const raw = document.createElement("code");
+    raw.textContent = info.detail;
+    details.append(summary, raw);
+    box.appendChild(details);
+  }
+  const note = document.createElement("p");
+  note.className = "active-rtdl-error-note";
+  note.textContent = t("Saved plans below are local records and are still available.");
+  box.appendChild(note);
+  return box;
 }
 
 function displayStatus(status) {
@@ -3051,7 +3172,7 @@ function renderTaskList() {
   const selected = selectedTask();
   const controls = maybe("taskScopeControls");
   if (controls) {
-    clear(controls);
+    const buttons = [];
     [["", "Follow latest task"]].forEach(([id, label]) => {
       const button = document.createElement("button");
       button.type = "button";
@@ -3059,8 +3180,9 @@ function renderTaskList() {
       button.textContent = t(label);
       button.setAttribute("aria-pressed", String(id ? !state.followLatestTask && state.selectedTaskId === id : state.followLatestTask));
       button.onclick = () => selectTask(id);
-      controls.appendChild(button);
+      buttons.push(button);
     });
+    replaceChildrenIfChanged(controls, buttons);
   }
   if (!tasks.length) {
     list.hidden = true;
@@ -3070,7 +3192,7 @@ function renderTaskList() {
   list.hidden = false;
   const scrollTop = list.scrollTop;
   const focusedTaskId = list.contains(document.activeElement) ? document.activeElement.dataset.taskId : null;
-  clear(list);
+  const rows = [];
   [...tasks].reverse().forEach((task) => {
     const statusKey = String(task.status || "").trim().toLowerCase();
     const row = document.createElement("button");
@@ -3089,8 +3211,12 @@ function renderTaskList() {
     status.className = "task-list-status";
     status.textContent = t(task.status || "");
     row.append(dot, goal, status);
-    list.appendChild(row);
+    rows.push(row);
   });
+  if (!replaceChildrenIfChanged(list, rows)) {
+    if (state.followLatestTask) list.scrollTop = 0;
+    return;
+  }
   if (focusedTaskId) [...list.children].find(row => row.dataset.taskId === focusedTaskId)?.focus({ preventScroll: true });
   list.scrollTop = state.followLatestTask ? 0 : scrollTop;
 }
@@ -3114,12 +3240,12 @@ function showCallDetails(context) {
     plan: context.plan?.planId || null,
   }, null, 2);
   root.append(fields, source, payload);
-  $("callDetailModal").showModal();
+  if (!$("callDetailModal").open) $("callDetailModal").showModal();
 }
 
 function executionSummaries() {
-  const task = selectedTask();
-  if (!task) return [];
+  // Without task ownership the conversation's plans share one untasked group.
+  const taskKey = selectedTask()?.taskId || "";
   const records = scopedPlanRecords();
   const ids = taskPlanIds();
   const terminal = value => {
@@ -3133,10 +3259,11 @@ function executionSummaries() {
     (plan.ops || []).forEach(op => active.set(`${plan.planId}/${op.op_id || op.opId}`, { plan, op }));
   });
 
-  // Keep one complete call group for the newest owned RTDL. Polling only
-  // updates these calls; a newer plan record is what replaces the group.
-  const record = records[0] || null;
-  const previous = state.lastExecutionByTask.get(task.taskId) || [];
+  // Keep one complete call group for the plan the tree shows (the running one,
+  // else the newest owned RTDL). Polling only updates these calls; a newer
+  // plan record is what replaces the group.
+  const record = displayPlanRecord(records);
+  const previous = state.lastExecutionByTask.get(taskKey) || [];
   const maps = record ? buildResultMaps(record) : null;
   const summaries = (record ? planCalls(record.plan) : []).map(node => {
     const activeCall = active.get(`${record.plan.planId}/${node.opId}`);
@@ -3194,7 +3321,7 @@ function executionSummaries() {
     };
     return sequence(right) - sequence(left);
   });
-  state.lastExecutionByTask.set(task.taskId, summaries);
+  state.lastExecutionByTask.set(taskKey, summaries);
   return summaries;
 }
 
@@ -3245,12 +3372,6 @@ function renderGoalPanel() {
     });
     goal.scrollTop = scrollTop;
   });
-}
-
-function currentTaskLabel() {
-  const text = state.taskState?.goal || firstUserMessage();
-  if (!text) return t("idle");
-  return text.length > 40 ? `${text.slice(0, 37)}...` : text;
 }
 
 async function refreshVoiceFinishSupport() {

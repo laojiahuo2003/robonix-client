@@ -174,7 +174,7 @@ test('ownership and tree arrival order never assigns a plan by timing', async ({
 });
 
 
-test('legacy cleanup removes old snapshots once and retains current records', async ({page}) => {
+test('legacy cleanup keeps saved conversations and only drops prompt-only history', async ({page}) => {
   await prepare(page);
   const result = await page.evaluate(() => {
     const base = {messages:[{role:'user',text:'saved'}]};
@@ -185,13 +185,23 @@ test('legacy cleanup removes old snapshots once and retains current records', as
       {...base,id:'current',taskState:{tasks:[{taskId:'T2',planIds:[]}]}}
     ]));
     localStorage.setItem('robonix.lastSessionId','old');
+    localStorage.setItem('robonix.history', JSON.stringify([{text:'prompt only'}]));
     const kept = loadConversations().map(c=>c.id);
     const persisted = JSON.parse(localStorage.getItem('robonix.conversations')).map(c=>c.id);
     const last = localStorage.getItem('robonix.lastSessionId');
+    const history = localStorage.getItem('robonix.history');
+    const flag = localStorage.getItem('robonix.taskOwnershipCleanup');
     localStorage.setItem('robonix.conversations',JSON.stringify([{...base,id:'new-awaiting-event'}]));
-    return {kept,persisted,last,next:loadConversations().map(c=>c.id)};
+    return {kept,persisted,last,history,flag,next:loadConversations().map(c=>c.id)};
   });
-  expect(result).toEqual({kept:['current'],persisted:['current'],last:null,next:['new-awaiting-event']});
+  expect(result).toEqual({
+    kept:['old','missing','current'],
+    persisted:['old','missing','current'],
+    last:'old',
+    history:null,
+    flag:'1',
+    next:['new-awaiting-event'],
+  });
 });
 
 
@@ -468,8 +478,7 @@ test('overview retains every owned round across tasks when Executor is empty or 
   await page.evaluate(() => {
     state.executorPlans = [];
     state.planRecords.push({...state.planRecords[1],key:'plan-a:2',plan:{...state.planRecords[1].plan,round:2}});
-    renderPlan();
-    document.querySelector('#activeRtdlModal').hidden = false;
+    openActiveRtdl();
     renderActivePlans();
   });
   const saved = page.locator('#savedRtdlList');
@@ -487,6 +496,89 @@ test('overview retains every owned round across tasks when Executor is empty or 
   await page.evaluate(() => renderActivePlans('offline'));
   await expect(saved.locator('summary')).toHaveCount(4);
   await page.screenshot({path:test.info().outputPath('plan-overview.png')});
+});
+
+test('unavailable Executor query names the failed hop and hides the raw gRPC error', async ({page}) => {
+  await prepare(page);
+  await page.route('**/api/executor/active-plans', route => route.fulfill({json:{
+    available:false,count:0,plans:[],reason:'atlas_unreachable',endpoint:'10.0.0.5:50051',error:'gRPC DEADLINE_EXCEEDED: Deadline Exceeded',
+  }}));
+  await page.evaluate(async () => {
+    $('robotHost').value = '10.0.0.5';
+    openActiveRtdl();
+    await refreshActivePlans();
+  });
+  const notice = page.locator('#activeRtdlList .active-rtdl-empty.error');
+  await expect(notice.locator('strong')).toHaveText('Cannot reach Atlas at 10.0.0.5:50051.');
+  await expect(notice.locator('details code')).toBeHidden();
+  await notice.locator('details summary').click();
+  await expect(notice.locator('details code')).toHaveText('gRPC DEADLINE_EXCEEDED: Deadline Exceeded');
+  await expect(notice).not.toContainText('AioRpcError');
+});
+
+test('overview polls keep saved-plan nodes and scroll while nothing changes', async ({page}) => {
+  await prepare(page);
+  const result = await page.evaluate(() => {
+    const plan = i => ({planId:`p${i}`,round:1,rootIndex:0,nodes:[{index:0,opId:`o${i}`,description:`call ${i}`,call:{name:'x'}}]});
+    state.taskState = {taskId:'T',tasks:[{taskId:'T',goal:'g',status:'done',planIds:Array.from({length:40},(_,i)=>`p${i}`)}]};
+    state.planRecords = Array.from({length:40},(_,i)=>({key:`p${i}:1`,plan:plan(i),nodeStates:{},batches:[{}]}));
+    openActiveRtdl();
+    document.querySelectorAll('#savedRtdlList details').forEach(d => { d.open = true; });
+    const body = document.querySelector('.active-rtdl-modal-body');
+    body.scrollTop = 600;
+    const node = document.querySelector('#savedRtdlList .saved-plan-node');
+    renderPlan();
+    const kept = node.isConnected;
+    state.planRecords[5].nodeStates = {0:{nodeIndex:0,state:'FAILED'}};
+    renderPlan();
+    return {kept, scroll: body.scrollTop, changed: !node.isConnected, open: document.querySelectorAll('#savedRtdlList details[open]').length};
+  });
+  expect(result).toEqual({kept:true, scroll:600, changed:true, open:40});
+});
+
+test('without task ownership the tree and Executor card show the same plan', async ({page}) => {
+  await prepare(page);
+  await page.evaluate(() => {
+    state.taskState = null;
+    state.planRecords = [{key:'L:1',plan:{planId:'L',round:1,rootIndex:0,nodes:[{index:0,opId:'L',call:{name:'legacy call'}}]},nodeStates:{},batches:[]}];
+    state.executorPlansReady = true;
+    state.executorPlans = [{planId:'L',ops:[{op_id:'L',kind:'do',state:'running'}]},{planId:'foreign',ops:[{op_id:'f',kind:'do',state:'running'}]}];
+    state.executorPlanIds = new Set(['L','foreign']);
+    renderPlan();
+  });
+  await expect(page.locator('[data-plan-tree]').first()).toContainText('Plan L');
+  await expect(page.locator('.goal-preview .goal-card > strong')).toHaveText(['legacy call']);
+  await expect(page.locator('.goal-preview .execution-summary-status')).toHaveText(['Executing now']);
+  await expect(page.locator('.goal-preview .call-detail-trigger')).toHaveCount(1);
+});
+
+test('Executor card follows the running plan when it is not the newest', async ({page}) => {
+  await prepare(page);
+  await page.evaluate(() => {
+    const plan = id => ({planId:id,round:1,rootIndex:0,nodes:[{index:0,opId:id,call:{name:`${id} call`}}]});
+    state.taskState = {taskId:'T',tasks:[{taskId:'T',goal:'g',status:'in_progress',planIds:['NEW','OLD']}]};
+    state.planRecords = [{key:'NEW:1',plan:plan('NEW'),nodeStates:{},batches:[{}]},{key:'OLD:1',plan:plan('OLD'),nodeStates:{},batches:[]}];
+    state.executorPlansReady = true;
+    state.executorPlans = [{planId:'OLD',ops:[{op_id:'OLD',kind:'do',state:'running'}]}];
+    state.executorPlanIds = new Set(['OLD']);
+    renderPlan();
+  });
+  await expect(page.locator('[data-plan-tree]').first()).toContainText('Plan OLD');
+  await expect(page.locator('.goal-preview .goal-card > strong')).toHaveText(['OLD call']);
+  await expect(page.locator('.goal-preview .execution-summary-status')).toHaveText(['Executing now']);
+});
+
+test('saved plans without task information get their own group', async ({page}) => {
+  await prepare(page);
+  await page.evaluate(() => {
+    state.taskState = {tasks:[]};
+    state.planRecords = [{key:'legacy:1',plan:{planId:'legacy',round:1,rootIndex:0,nodes:[{index:0,opId:'o',description:'move',call:{name:'move'}}]},nodeStates:{0:{state:'SUCCEEDED'}},batches:[{}]}];
+    openActiveRtdl();
+  });
+  const group = page.locator('#savedRtdlList .saved-plan-task');
+  await expect(group).toHaveCount(1);
+  await expect(group.locator('h4')).toHaveText('Plans without task information');
+  await expect(group.locator('.saved-plan-record > summary')).toContainText('legacy');
 });
 
 
