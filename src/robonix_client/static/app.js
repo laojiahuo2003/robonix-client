@@ -208,14 +208,29 @@ function hasConversationContent(conversation = null) {
 function loadConversations() {
   try {
     const raw = JSON.parse(localStorage.getItem("robonix.conversations") || "[]");
-    let conversations = Array.isArray(raw) ? raw.filter(c => hasConversationContent(c)) : [];
-    // One-time migration: preserve conversations without taskState (legacy sessions)
-    // and conversations still awaiting their first task_state event.
-    if (localStorage.getItem("robonix.taskOwnershipCleanup") !== "1") {
-      localStorage.removeItem("robonix.history");
-      localStorage.setItem("robonix.taskOwnershipCleanup", "1");
+    if (Array.isArray(raw)) {
+      return raw.filter((c) => hasConversationContent(c));
     }
-    return conversations;
+  } catch (_) {
+    // Fall through to one-time migration from the old prompt-only history.
+  }
+  try {
+    const oldHistory = JSON.parse(localStorage.getItem("robonix.history") || "[]");
+    if (!Array.isArray(oldHistory)) return [];
+    return oldHistory
+      .slice(0, 18)
+      .filter((item) => item.text && item.text.trim())
+      .map((item) => ({
+        id: getSessionId(),
+        title: truncateTitle(item.text, 24) || t("Untitled chat"),
+        customTitle: false,
+        updatedAt: item.at || Date.now(),
+        messages: [{ id: getSessionId(), role: "user", text: item.text, meta: "" }],
+        timeline: [],
+        plan: null,
+        batches: [],
+        nodeStates: {},
+      }));
   } catch (_) {
     return [];
   }
@@ -2182,8 +2197,9 @@ function pruneTreeObservers() {
   });
   // The view state is only a few numbers, but the map is unbounded: a long
   // session used to keep one entry per plan it ever drew.
+  const records = normalizedPlanRecords();
   treeViewStates.forEach((_, key) => {
-    const retained = normalizedPlanRecords().some(record => key.startsWith(`plan:${record.plan.planId}:`));
+    const retained = records.some(record => key.startsWith(`plan:${record.plan.planId}:`));
     if (!treeLiveKeys.has(key) && !retained) treeViewStates.delete(key);
   });
 }
@@ -3134,20 +3150,17 @@ function currentExecutionContext() {
       };
       return Number(running(b)) - Number(running(a)) || order(a) - order(b) || String(a.planId).localeCompare(String(b.planId));
     });
-    for (const plan of plans) {
-      const runningOp = (plan.ops || []).find((op) => String(op.state || "").toLowerCase() === "running") || null;
-      const record = normalizedPlanRecords().find(
-        (item) => String(item.plan?.planId || "") === String(plan.planId || ""),
-      );
-      const node = runningOp && record ? executorNodeForOp(record, runningOp) : null;
-      return {
-        source: runningOp ? "Executor verified" : "Executor plan verified",
-        plan,
-        op: runningOp,
-        node,
-      };
-    }
-    return null;
+    const plan = plans[0];
+    if (!plan) return null;
+    const runningOp = (plan.ops || []).find((op) => String(op.state || "").toLowerCase() === "running") || null;
+    const record = records.find((item) => String(item.plan?.planId || "") === String(plan.planId || ""));
+    const node = runningOp && record ? executorNodeForOp(record, runningOp) : null;
+    return {
+      source: runningOp ? "Executor verified" : "Executor plan verified",
+      plan,
+      op: runningOp,
+      node,
+    };
   }
   if (state.taskStateStale) return null;
   const node = activePlanNode();
@@ -3172,17 +3185,13 @@ function renderTaskList() {
   const selected = selectedTask();
   const controls = maybe("taskScopeControls");
   if (controls) {
-    const buttons = [];
-    [["", "Follow latest task"]].forEach(([id, label]) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "task-scope-button";
-      button.textContent = t(label);
-      button.setAttribute("aria-pressed", String(id ? !state.followLatestTask && state.selectedTaskId === id : state.followLatestTask));
-      button.onclick = () => selectTask(id);
-      buttons.push(button);
-    });
-    replaceChildrenIfChanged(controls, buttons);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "task-scope-button";
+    button.textContent = t("Follow latest task");
+    button.setAttribute("aria-pressed", String(state.followLatestTask));
+    button.onclick = () => selectTask("");
+    replaceChildrenIfChanged(controls, [button]);
   }
   if (!tasks.length) {
     list.hidden = true;
@@ -3275,10 +3284,10 @@ function executionSummaries() {
     const label = terminal(savedState) || terminal(liveState) || terminal(retained?.label)
       || (["verifying", "paused"].includes(liveState) ? liveState : null)
       || (["verifying", "paused"].includes(savedState) ? savedState : null)
-      || (String(liveState || "").toLowerCase() === "running"
+      || (liveState === "running"
         || (!state.executorPlansReady && !state.taskStateStale && savedState === "running") ? "Executing now" : null)
       || (result?.leafResult ? (result.leafResult.success ? "completed" : "failed") : null)
-      || (liveState ? String(liveState).toLowerCase() : null)
+      || liveState || null
       || (savedState === "running" || observed || record.batches?.length ? "Live status unconfirmed" : "pending");
     return {
       context: {
@@ -3328,6 +3337,8 @@ function executionSummaries() {
 function renderGoalPanel() {
   renderTaskList();
   const summaries = executionSummaries();
+  const ids = taskPlanIds();
+  const planExecuting = state.executorPlansReady && state.executorPlans.some(plan => ids.has(String(plan.planId)));
   document.querySelectorAll("[data-goal-preview]").forEach(goal => {
     const scrollTop = goal.scrollTop;
     clear(goal);
@@ -3345,8 +3356,7 @@ function renderGoalPanel() {
       card.appendChild(heading);
       const title = document.createElement("strong");
       title.textContent = context?.node?.call?.name || context?.op?.description || context?.plan?.description
-        || t(state.executorPlansReady && state.executorPlans.some(plan => taskPlanIds().has(String(plan.planId)))
-          ? "Plan executing; waiting for call information." : "No calls yet.");
+        || t(planExecuting ? "Plan executing; waiting for call information." : "No calls yet.");
       title.title = title.textContent;
       const fields = document.createElement("div");
       fields.className = "goal-call-grid";

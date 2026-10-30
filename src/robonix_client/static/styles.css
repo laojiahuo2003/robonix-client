@@ -241,7 +241,6 @@ select {
 .panel-header span,
 .field span,
 .metric span,
-.goal-line,
 .detail-grid span {
   color: var(--muted);
   font-size: 12px;
@@ -1478,11 +1477,6 @@ select:focus {
   background: rgba(126, 145, 156, 0.1);
 }
 
-.goal-line {
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--line-soft);
-}
-
 .execution-table {
   min-height: 0;
   max-height: 240px;
@@ -2550,19 +2544,12 @@ select:focus {
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  scrollbar-width: thin;
 }
 
 .goal-preview,
 .task-list {
   scrollbar-width: thin !important;
   scrollbar-color: var(--line) transparent;
-}
-
-.goal-details summary {
-  cursor: pointer;
-  color: var(--muted);
-  font-size: 12px;
 }
 
 .task-list[hidden] {
@@ -2581,18 +2568,24 @@ select:focus {
   overflow-x: hidden;
   overflow-y: auto;
   padding: 0 12px 12px;
-  scrollbar-width: thin;
 }
 
 .task-list-row {
   display: flex;
   align-items: center;
   gap: 6px;
-  min-height: 24px;
-  padding: 4px 8px;
+  width: 100%;
+  height: 24px;
+  min-width: 0;
+  padding: 3px 8px;
+  border: 1px solid transparent;
   border-radius: 6px;
+  background: transparent;
   font-size: 12px;
+  line-height: 14px;
+  text-align: left;
   color: var(--muted);
+  cursor: pointer;
 }
 
 .task-list-row .task-list-dot {
@@ -5958,16 +5951,14 @@ select:focus {
 }
 
 .dashboard-sidebar > .panel[data-sidebar-panel="rtdl"]:not([hidden]) {
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
 }
 
 /* Filling the panel means every box between the panel and the SVG viewport
    needs a definite height. The first content-sized box in that chain would
    collapse the tree back to its drawing size, which is what used to leave the
    viewport a small strip at the top of the panel. */
-/* Keep the tree in the flexible row even when the summary header is hidden. */
 .dashboard-sidebar > .panel[data-sidebar-panel="rtdl"]:not([hidden]) .execution-table {
-  grid-row: 2;
   display: flex;
   flex-direction: column;
   max-height: none;
@@ -6066,17 +6057,6 @@ select:focus {
   background: rgba(72, 166, 223, 0.055);
   border-color: transparent;
   box-shadow: inset 2px 0 var(--line);
-}
-.task-list-row {
-  width: 100%;
-  height: 24px;
-  min-width: 0;
-  border: 1px solid transparent;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-  line-height: 14px;
-  padding: 3px 8px;
 }
 .task-list-row:hover {
   background: rgba(72, 166, 223, 0.12);
@@ -6178,8 +6158,6 @@ select:focus {
   min-width: 0;
 }
 
-.execution-panel > .panel-header[hidden] { display: none; }
-
 .execution-heading {
   display: flex;
   align-items: center;
@@ -6190,8 +6168,6 @@ select:focus {
 .executor-label { font-size: 14px; line-height: 1.2; font-weight: 720; letter-spacing: 0; color: var(--text); }
 
 .goal-preview > .goal-card + .goal-card { border-top: 1px solid var(--line-soft); margin-top: 14px; padding-top: 14px; }
-
-
 
 .overview-section { display: grid; gap: 10px; min-width: 0; }
 .overview-section + .overview-section { padding-top: 14px; border-top: 1px solid var(--line-soft); }

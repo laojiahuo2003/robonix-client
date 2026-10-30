@@ -134,7 +134,11 @@ test('task selection scopes tree, history and Executor, with no foreign fallback
   await expect(page.locator('.goal-card > strong')).toHaveText('plan-a');
   await expect(page.locator('#rtdlHistoryTrees')).toContainText('plan-a-old');
   await expect(page.locator('#rtdlHistoryTrees')).not.toContainText('plan-b');
+  const follow = page.locator('.task-scope-button');
+  await expect(follow).toHaveCount(1);
+  await expect(follow).toHaveAttribute('aria-pressed','true');
   await page.locator('[data-task-id="B"]').click();
+  await expect(follow).toHaveAttribute('aria-pressed','false');
   await expect(page.locator('[data-plan-tree]').first()).toContainText('plan-b');
   expect(await page.evaluate(()=>currentExecutionContext().plan.planId)).toBe('plan-b');
   await expect(page.locator('.goal-card > strong')).toHaveText('plan-b');
@@ -144,6 +148,7 @@ test('task selection scopes tree, history and Executor, with no foreign fallback
   await page.reload();
   await expect(page.locator('[data-task-id="B"]')).toHaveAttribute('aria-pressed','true');
   await page.getByRole('button',{name:'Follow latest task',exact:true}).click();
+  await expect(follow).toHaveAttribute('aria-pressed','true');
   await expect(page.locator('[data-task-id="C"]')).toHaveAttribute('aria-pressed','true');
   await expect(page.locator('[data-plan-tree]').first()).toContainText('has not produced');
   expect(await page.evaluate(()=>currentExecutionContext())).toBeNull();
@@ -174,33 +179,27 @@ test('ownership and tree arrival order never assigns a plan by timing', async ({
 });
 
 
-test('legacy cleanup keeps saved conversations and only drops prompt-only history', async ({page}) => {
+test('saved conversations load with or without task state and old prompt history still migrates', async ({page}) => {
   await prepare(page);
   const result = await page.evaluate(() => {
     const base = {messages:[{role:'user',text:'saved'}]};
-    localStorage.removeItem('robonix.taskOwnershipCleanup');
+    const oldHistory = JSON.stringify([{text:'prompt only',at:1}, {text:'  '}]);
     localStorage.setItem('robonix.conversations', JSON.stringify([
       {...base,id:'old'},
       {...base,id:'missing',taskState:{tasks:[{taskId:'T1'}]}},
       {...base,id:'current',taskState:{tasks:[{taskId:'T2',planIds:[]}]}}
     ]));
-    localStorage.setItem('robonix.lastSessionId','old');
-    localStorage.setItem('robonix.history', JSON.stringify([{text:'prompt only'}]));
+    localStorage.setItem('robonix.history', oldHistory);
     const kept = loadConversations().map(c=>c.id);
-    const persisted = JSON.parse(localStorage.getItem('robonix.conversations')).map(c=>c.id);
-    const last = localStorage.getItem('robonix.lastSessionId');
-    const history = localStorage.getItem('robonix.history');
-    const flag = localStorage.getItem('robonix.taskOwnershipCleanup');
-    localStorage.setItem('robonix.conversations',JSON.stringify([{...base,id:'new-awaiting-event'}]));
-    return {kept,persisted,last,history,flag,next:loadConversations().map(c=>c.id)};
+    const historyKept = localStorage.getItem('robonix.history') === oldHistory;
+    localStorage.setItem('robonix.conversations', '{not json');
+    const migrated = loadConversations().map(c=>({text:c.messages[0].text, updatedAt:c.updatedAt}));
+    return {kept, historyKept, migrated};
   });
   expect(result).toEqual({
     kept:['old','missing','current'],
-    persisted:['old','missing','current'],
-    last:'old',
-    history:null,
-    flag:'1',
-    next:['new-awaiting-event'],
+    historyKept:true,
+    migrated:[{text:'prompt only', updatedAt:1}],
   });
 });
 
@@ -286,7 +285,7 @@ test('plan header shows one summary and does not label a failed plan completed',
 });
 
 
-test('RTDL viewport fills the panel after its duplicate header is hidden', async ({page}) => {
+test('RTDL viewport fills the panel', async ({page}) => {
   await ownershipFixture(page);
   const checkFill = async () => {
     const geometry = await page.evaluate(() => {
@@ -302,7 +301,6 @@ test('RTDL viewport fills the panel after its duplicate header is hidden', async
   await checkFill();
   await page.locator('[data-task-id="C"]').click();
   await expect(page.locator('[data-sidebar-panel="rtdl"] .plan-empty')).toHaveCount(1);
-  await expect(page.locator('[data-plan-summary]')).toHaveCount(0);
   await page.locator('[data-task-id="B"]').click();
   await checkFill();
   await page.screenshot({path:test.info().outputPath('rtdl-filled.png')});
